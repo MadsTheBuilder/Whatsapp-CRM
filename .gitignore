@@ -1,0 +1,4 @@
+node_modules/
+.env
+fourthspace.db
+fourthspace.db-*
