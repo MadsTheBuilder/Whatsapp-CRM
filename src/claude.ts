@@ -1,28 +1,35 @@
 import OpenAI from "openai";
 import type Anthropic from "@anthropic-ai/sdk";
 
-// Routed through OpenRouter (OpenAI-compatible) for free-model testing.
-// The Anthropic SDK is unused at runtime now — we keep its InputSchema *type*
-// only so qualify.ts / replies.ts don't have to change.
-// ponytail: single provider client here — swap baseURL back to Anthropic and
-// use one MODEL when a real key is available.
+// OpenAI-compatible client. Two supported backends, selected by LLM_BASE_URL:
+//   - Ollama (local, default):  http://localhost:11434/v1  — no rate limits.
+//   - OpenRouter (cloud):       https://openrouter.ai/api/v1 — free models flaky.
+// Swap by setting LLM_BASE_URL + MODEL in .env; no code change.
+// The Anthropic SDK is unused at runtime — we keep its InputSchema *type* only
+// so qualify.ts / replies.ts don't have to change.
+const BASE_URL = process.env.LLM_BASE_URL ?? "http://localhost:11434/v1";
+// Ollama's OpenAI-compat layer ignores forced tool_choice (returns prose), but
+// its native /api/chat honors `format: <schema>` for reliable structured JSON.
+// So on Ollama we bypass the OpenAI SDK and hit /api/chat directly.
+const IS_OLLAMA = /localhost:11434|127\.0\.0\.1:11434/.test(BASE_URL);
+const OLLAMA_CHAT = BASE_URL.replace(/\/v1\/?$/, "") + "/api/chat";
+
 export const client = new OpenAI({
-  apiKey: process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
-  baseURL: "https://openrouter.ai/api/v1",
-  timeout: 30000,
+  apiKey:
+    process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? "ollama",
+  baseURL: BASE_URL,
+  timeout: 60000, // local models are slower to first token than a hosted API
   maxRetries: 0,
 });
 
-// MODEL is tried first; the rest are fallbacks for when a free model is
-// rate-limited (free OpenRouter models 429/402 constantly). First that answers
-// wins. Add your own OpenRouter credits to make any single model reliable.
-const PRIMARY = process.env.MODEL ?? "google/gemma-4-31b-it:free";
-const FALLBACKS = [
-  "nvidia/nemotron-3-super-120b-a12b:free",
-  "nvidia/nemotron-3-nano-30b-a3b:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen3-next-80b-a3b-instruct:free",
-];
+// MODEL is tried first; FALLBACKS only matter for the flaky cloud free tier.
+// With local Ollama there's one model and no rate limits, so the chain is just
+// [MODEL]. Keep OpenRouter fallbacks here for when LLM_BASE_URL points at it.
+const PRIMARY = process.env.MODEL ?? "llama3.1:8b";
+const FALLBACKS = (process.env.MODEL_FALLBACKS ?? "")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
 export const MODEL = PRIMARY;
 const MODEL_CHAIN = [PRIMARY, ...FALLBACKS.filter((m) => m !== PRIMARY)];
 
@@ -36,6 +43,8 @@ export async function structured<T>(
   user: string,
   schema: Anthropic.Tool.InputSchema,
 ): Promise<T> {
+  if (IS_OLLAMA) return ollamaStructured<T>(system, user, schema);
+
   let lastErr: unknown;
   for (const model of MODEL_CHAIN) {
     try {
@@ -73,6 +82,36 @@ export async function structured<T>(
     }
   }
   throw new Error(`all models failed. last: ${errMsg(lastErr)}`);
+}
+
+/**
+ * Ollama path: use native /api/chat with `format: <json schema>`, which
+ * constrains generation to schema-valid JSON (tool_choice is unreliable here).
+ * The model's message.content IS the JSON object.
+ */
+async function ollamaStructured<T>(
+  system: string,
+  user: string,
+  schema: Anthropic.Tool.InputSchema,
+): Promise<T> {
+  const res = await fetch(OLLAMA_CHAT, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: PRIMARY,
+      stream: false,
+      format: schema,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`ollama ${res.status}: ${await res.text()}`);
+  const data = (await res.json()) as { message?: { content?: string } };
+  const content = data.message?.content;
+  if (!content) throw new Error("ollama: empty response");
+  return JSON.parse(content) as T; // format:schema guarantees valid JSON
 }
 
 function errMsg(e: unknown): string {

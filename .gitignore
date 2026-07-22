@@ -3,3 +3,13 @@ node_modules/
 fourthspace.db
 fourthspace.db-*
 server.log
+
+# WhatsApp session credentials (Baileys) — live keys for the agent's number. NEVER commit.
+baileys_auth/
+
+# Local runtime logs — not source.
+*.log
+
+
+# Out-of-scope embedded clone (has its own git repo).
+wacrm/

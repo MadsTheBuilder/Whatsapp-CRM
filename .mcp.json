@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "propertyfinder": {
+      "command": "c:\\Users\\madhu\\Claude Code\\Creating API\\propertyfinder-api\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "pf_api.mcp_server"],
+      "env": {
+        "PF_API_BASE": "http://localhost:8642",
+        "PYTHONPATH": "c:\\Users\\madhu\\Claude Code\\Creating API\\propertyfinder-api\\src"
+      }
+    }
+  }
+}

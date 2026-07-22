@@ -1,92 +1,37 @@
-import "dotenv/config";
-import express, { type Request, type Response } from "express";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { webhookRouter } from "./webhook.js";
-import {
-  listLeads,
-  getLead,
-  getMessages,
-  saveMessage,
-  type Lead,
-} from "./store.js";
-import { makeBSP } from "./bsp/index.js";
+import "dotenv/config"; // MUST be first — store.ts throws at import if SUPABASE_* unset.
+import express from "express";
+import { companyRouter } from "./company.js";
+import { startBaileys } from "./pipe/baileys.js";
+import { runDailyReminders, REMINDER_INTERVAL_MS } from "./reminders.js";
 
-const AGENT_ID = process.env.AGENT_ID ?? "agent_demo";
+// Thin bootstrap. It wires the three live pieces together and does nothing else:
+//   - Baileys read-pipe on the AGENT's number  (reads lead chats → brain)
+//   - /company-webhook on the COMPANY number    (agent's Q&A → answer → DM)
+//   - a daily reminder tick                      (3-day-silent leads → digest DM)
+// No /api/send, /api/threads, /api/properties or web UI — the bot never sends to
+// a lead, so there is nothing for a lead-facing route or inbox to do here.
+
 const PORT = Number(process.env.PORT ?? 3000);
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-app.use(express.json());
+app.use(express.json()); // 360dialog posts JSON; companyRouter reads req.body
+app.use(companyRouter);
 
-// Meta Cloud API webhook (GET verify + POST receive)
-app.use(webhookRouter);
-
-// Serve the minimal inbox UI
-app.use(express.static(join(__dirname, "web")));
-
-/** Shape a lead row for the inbox: fields, missing list, cached replies. */
-function threadView(lead: Lead) {
-  const missing: string[] = [];
-  if (!lead.budget) missing.push("budget");
-  if (!lead.area) missing.push("area");
-  if (!lead.requirement) missing.push("requirement");
-  return {
-    id: lead.id,
-    phone: lead.phone,
-    name: lead.name,
-    stage: lead.stage,
-    budget: lead.budget,
-    area: lead.area,
-    requirement: lead.requirement,
-    missing,
-    next_question: lead.next_question,
-    replies: lead.replies_json ? (JSON.parse(lead.replies_json) as string[]) : [],
-  };
-}
-
-// List conversations for the inbox left pane.
-app.get("/api/threads", (_req: Request, res: Response) => {
-  res.json(listLeads(AGENT_ID).map(threadView));
+// Read-pipe: connect to the agent's WhatsApp. A boot failure here is fatal —
+// without it the brain never sees a message, so let it crash rather than run blind.
+startBaileys().catch((e) => {
+  console.error("[server] baileys failed to start:", e);
+  process.exit(1);
 });
 
-// Full thread: lead fields + message history.
-app.get("/api/threads/:id", (req: Request, res: Response) => {
-  const lead = getLead(AGENT_ID, Number(req.params.id));
-  if (!lead) {
-    res.sendStatus(404);
-    return;
-  }
-  res.json({
-    ...threadView(lead),
-    messages: getMessages(AGENT_ID, lead.id),
-  });
-});
+// Daily follow-up digest: once on boot, then every 24h. A failed run must not kill
+// the process (a transient store/360dialog error shouldn't take the server down) —
+// runDailyReminders doesn't swallow its own errors, so catch here.
+const reminderTick = () =>
+  runDailyReminders().catch((e) => console.error("[server] reminder run failed:", e));
+reminderTick();
+// ponytail: in-process setInterval, fine for one agent. Move to a real scheduler
+// (cron/pg_cron) if this ever needs to survive restarts or run multi-agent.
+setInterval(reminderTick, REMINDER_INTERVAL_MS);
 
-// Agent picks a reply (or types custom) → send through the BSP adapter.
-const bsp = makeBSP();
-app.post("/api/send", async (req: Request, res: Response) => {
-  const { lead_id, body } = req.body ?? {};
-  if (typeof lead_id !== "number" || typeof body !== "string" || !body.trim()) {
-    res.status(400).json({ error: "lead_id (number) and body (string) required" });
-    return;
-  }
-  const lead = getLead(AGENT_ID, lead_id);
-  if (!lead) {
-    res.sendStatus(404);
-    return;
-  }
-  try {
-    await bsp.send(lead.phone, body);
-    saveMessage(AGENT_ID, lead.id, "out", body);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("send error:", err);
-    res.status(502).json({ error: String(err) });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`FourthspaceOS MVP on http://localhost:${PORT}/inbox.html`);
-  console.log(`BSP=${process.env.BSP ?? "mock"}  MODEL=${process.env.MODEL ?? "claude-sonnet-5"}`);
-});
+app.listen(PORT, () => console.log(`[server] company-webhook listening on :${PORT}`));

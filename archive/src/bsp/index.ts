@@ -1,5 +1,6 @@
 import { MockBSP } from "./mock.js";
 import { MetaCloudBSP } from "./meta.js";
+import { Dialog360BSP } from "./dialog360.js";
 
 /** The "add the number later" seam. Every send routes through this. */
 export interface BSP {
@@ -11,5 +12,6 @@ export interface BSP {
 export function makeBSP(): BSP {
   const which = (process.env.BSP ?? "mock").toLowerCase();
   if (which === "meta") return new MetaCloudBSP();
+  if (which === "dialog360") return new Dialog360BSP();
   return new MockBSP();
 }

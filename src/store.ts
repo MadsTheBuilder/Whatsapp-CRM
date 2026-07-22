@@ -1,41 +1,21 @@
-import { DatabaseSync } from "node:sqlite";
+import { createClient } from "@supabase/supabase-js";
 
-// Single-file SQLite via Node's built-in module (no native build). agent_id
-// lives on every row from the first insert so the multi-tenant shape is real
-// even while the demo runs one agent.
-// ponytail: single DB file, no migrations tool — add one when the schema churns.
-const db = new DatabaseSync("fourthspace.db");
-db.exec("PRAGMA journal_mode = WAL");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS leads (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id     TEXT NOT NULL,
-    phone        TEXT NOT NULL,
-    name         TEXT,
-    stage        TEXT NOT NULL DEFAULT 'first_contact',
-    budget       TEXT,
-    area         TEXT,
-    requirement  TEXT,
-    status       TEXT NOT NULL DEFAULT 'open',
-    next_question TEXT,
-    replies_json TEXT,
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(agent_id, phone)
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id   TEXT NOT NULL,
-    lead_id    INTEGER NOT NULL,
-    direction  TEXT NOT NULL,            -- 'in' | 'out'
-    body       TEXT NOT NULL,
-    ts         TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (lead_id) REFERENCES leads(id)
-  );
-`);
+// Supabase (Postgres) storage via the service-role key — server-side only, so
+// it bypasses RLS and never touches the browser. agent_id lives on every row so
+// the one-agent demo is already multi-tenant-shaped (CLAUDE.md). Schema lives in
+// supabase/schema.sql; there is no local DB file.
+const url = process.env.SUPABASE_URL;
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!url || !key) {
+  throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set");
+}
+const db = createClient(url, key, { auth: { persistSession: false } });
 
 export type Stage = "first_contact" | "following_up" | "deep";
+
+// Approval gate: a number the read-pipe sees is only processed once the agent
+// opts it in. New numbers land 'pending'; the agent taps Yes/No to approve/reject.
+export type Monitor = "pending" | "approved" | "rejected";
 
 export interface Lead {
   id: number;
@@ -43,12 +23,15 @@ export interface Lead {
   phone: string;
   name: string | null;
   stage: Stage;
+  monitor: Monitor;
   budget: string | null;
   area: string | null;
   requirement: string | null;
   status: string;
   next_question: string | null;
   replies_json: string | null;
+  summary: string | null;
+  summary_upto: number;
   updated_at: string;
 }
 
@@ -61,32 +44,78 @@ export interface Message {
   ts: string;
 }
 
-/** Find an existing lead by phone or create one. agent_id scopes every lookup. */
-export function upsertLead(agentId: string, phone: string, name?: string): Lead {
-  const existing = db
-    .prepare("SELECT * FROM leads WHERE agent_id = ? AND phone = ?")
-    .get(agentId, phone) as unknown as Lead | undefined;
-  if (existing) {
-    if (name && !existing.name) {
-      db.prepare("UPDATE leads SET name = ? WHERE id = ?").run(name, existing.id);
-      existing.name = name;
+/** Look up a lead by phone, or undefined if this number has never been seen.
+ *  The approval gate uses "undefined" to mean "brand-new number — prompt the agent". */
+export async function findLeadByPhone(agentId: string, phone: string): Promise<Lead | undefined> {
+  const { data } = await db
+    .from("leads")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("phone", phone)
+    .maybeSingle();
+  return (data as Lead) ?? undefined;
+}
+
+/** Create a lead in 'pending' so it's remembered as awaiting approval. `created`
+ *  is true only when THIS call inserted the row — so the caller fires the approval
+ *  prompt exactly once even if a concurrent message raced to the same phone (the
+ *  loser hits the unique constraint, recovers the existing row, and created=false). */
+export async function createPendingLead(
+  agentId: string,
+  phone: string,
+  name?: string,
+): Promise<{ lead: Lead; created: boolean }> {
+  const { data, error } = await db
+    .from("leads")
+    .insert({ agent_id: agentId, phone, name: name ?? null }) // monitor defaults 'pending'
+    .select("*")
+    .single();
+  if (error) {
+    if (error.code === "23505") {
+      const existing = await findLeadByPhone(agentId, phone);
+      if (existing) return { lead: existing, created: false };
     }
-    return existing;
+    throw error;
   }
-  const info = db
-    .prepare("INSERT INTO leads (agent_id, phone, name) VALUES (?, ?, ?)")
-    .run(agentId, phone, name ?? null);
-  return getLead(agentId, Number(info.lastInsertRowid))!;
+  return { lead: data as Lead, created: true };
 }
 
-export function getLead(agentId: string, id: number): Lead | undefined {
-  return db
-    .prepare("SELECT * FROM leads WHERE agent_id = ? AND id = ?")
-    .get(agentId, id) as unknown as Lead | undefined;
+/** Set a lead's approval state (agent tapped Yes/No). Returns false if no such
+ *  pending lead exists (already decided, or number never prompted). */
+export async function setMonitor(
+  agentId: string,
+  phone: string,
+  monitor: Monitor,
+): Promise<boolean> {
+  const { data, error } = await db
+    .from("leads")
+    .update({ monitor, updated_at: new Date().toISOString() })
+    .eq("agent_id", agentId)
+    .eq("phone", phone)
+    .select("id");
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
 }
 
-/** Update extracted qualification fields + cached reply options on a lead. */
-export function updateLeadQualification(
+export async function getLead(agentId: string, id: number): Promise<Lead | undefined> {
+  const { data } = await db
+    .from("leads")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("id", id)
+    .maybeSingle();
+  return (data as Lead) ?? undefined;
+}
+
+/**
+ * Update extracted qualification fields + cached reply options on a lead.
+ * Fields are sticky: a null extraction (the model didn't surface it this pass)
+ * keeps the prior value — so a known budget/area/requirement never silently
+ * reverts. We get the old COALESCE semantics by omitting null keys from the
+ * update object, so Postgres leaves those columns untouched. A real correction
+ * still lands — it arrives non-null.
+ */
+export async function updateLeadQualification(
   agentId: string,
   id: number,
   fields: {
@@ -97,45 +126,150 @@ export function updateLeadQualification(
     next_question: string | null;
     replies: string[];
   },
-): void {
-  db.prepare(
-    `UPDATE leads
-       SET budget = ?, area = ?, requirement = ?, stage = ?,
-           next_question = ?, replies_json = ?, updated_at = datetime('now')
-     WHERE agent_id = ? AND id = ?`,
-  ).run(
-    fields.budget,
-    fields.area,
-    fields.requirement,
-    fields.stage,
-    fields.next_question,
-    JSON.stringify(fields.replies),
-    agentId,
-    id,
-  );
+): Promise<void> {
+  const update: Record<string, unknown> = {
+    stage: fields.stage,
+    next_question: fields.next_question,
+    replies_json: JSON.stringify(fields.replies),
+    updated_at: new Date().toISOString(),
+  };
+  // Only non-null sticky fields go in — a null one is left alone (COALESCE).
+  if (fields.budget !== null) update.budget = fields.budget;
+  if (fields.area !== null) update.area = fields.area;
+  if (fields.requirement !== null) update.requirement = fields.requirement;
+
+  const { error } = await db.from("leads").update(update).eq("agent_id", agentId).eq("id", id);
+  if (error) throw error;
 }
 
-export function saveMessage(
+/** Insert a message. Returns false if this waId was already stored (provider re-delivery). */
+export async function saveMessage(
   agentId: string,
   leadId: number,
   direction: "in" | "out",
   body: string,
-): void {
-  db.prepare(
-    "INSERT INTO messages (agent_id, lead_id, direction, body) VALUES (?, ?, ?, ?)",
-  ).run(agentId, leadId, direction, body);
+  waId?: string,
+): Promise<boolean> {
+  const row = { agent_id: agentId, lead_id: leadId, direction, body, wa_id: waId ?? null };
+  // Plain insert + catch the unique violation. The dedup index is PARTIAL
+  // (wa_id is not null), which ON CONFLICT can't target by column list — so we
+  // let a duplicate non-null wa_id raise 23505 and report it as "already stored".
+  // Null wa_id never trips the partial index, so outbound/simulated rows always land.
+  const { error } = await db.from("messages").insert(row);
+  if (error) {
+    if (error.code === "23505") return false; // duplicate wa_id (provider re-delivery)
+    throw error;
+  }
+  return true;
 }
 
-export function getMessages(agentId: string, leadId: number): Message[] {
-  return db
-    .prepare(
-      "SELECT * FROM messages WHERE agent_id = ? AND lead_id = ? ORDER BY id ASC",
-    )
-    .all(agentId, leadId) as unknown as Message[];
+export async function getMessages(agentId: string, leadId: number): Promise<Message[]> {
+  const { data, error } = await db
+    .from("messages")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("lead_id", leadId)
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return (data as Message[]) ?? [];
 }
 
-export function listLeads(agentId: string): Lead[] {
-  return db
-    .prepare("SELECT * FROM leads WHERE agent_id = ? ORDER BY updated_at DESC")
-    .all(agentId) as unknown as Lead[];
+/** Save the rolling summary + replace the fact list for a lead (single memory write).
+ *  upto = id of the newest message folded into this summary (the watermark). */
+export async function saveMemory(
+  agentId: string,
+  leadId: number,
+  summary: string,
+  facts: string[],
+  upto: number,
+): Promise<void> {
+  const { error: upErr } = await db
+    .from("leads")
+    .update({ summary, summary_upto: upto, updated_at: new Date().toISOString() })
+    .eq("agent_id", agentId)
+    .eq("id", leadId);
+  if (upErr) throw upErr;
+
+  await db.from("memory").delete().eq("agent_id", agentId).eq("lead_id", leadId);
+
+  // Strip any leading bullet the model echoed back (the fold-in prompt shows
+  // prior facts as "- fact", and the model sometimes copies the dash in), dedup.
+  const seen = new Set<string>();
+  const rows: { agent_id: string; lead_id: number; fact: string }[] = [];
+  for (const f of facts) {
+    const clean = f.replace(/^[-*•\s]+/, "").trim();
+    const dedupKey = clean.toLowerCase();
+    if (clean && !seen.has(dedupKey)) {
+      seen.add(dedupKey);
+      rows.push({ agent_id: agentId, lead_id: leadId, fact: clean });
+    }
+  }
+  if (rows.length) {
+    const { error } = await db.from("memory").insert(rows);
+    if (error) throw error;
+  }
+}
+
+export async function getFacts(agentId: string, leadId: number): Promise<string[]> {
+  const { data, error } = await db
+    .from("memory")
+    .select("fact")
+    .eq("agent_id", agentId)
+    .eq("lead_id", leadId)
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return ((data as { fact: string }[]) ?? []).map((r) => r.fact);
+}
+
+/** Approved leads only — pending/rejected numbers (the approval gate) are not
+ *  leads the agent is working, so they never show up in counts or reminders. */
+export async function listLeads(agentId: string): Promise<Lead[]> {
+  const { data, error } = await db
+    .from("leads")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("monitor", "approved")
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data as Lead[]) ?? [];
+}
+
+// A lead is "no reply" once the agent's last message has gone unanswered past this.
+// Also the WhatsApp free-text window, so past it you'd need a template anyway.
+const QUIET_MS = 24 * 60 * 60 * 1000;
+
+export type Responsiveness = "active" | "awaiting_reply" | "no_reply";
+
+/**
+ * Derived live from the messages — no stored column. An inbound message is the
+ * only thing that resets it: last message inbound => "active" (ball's in the
+ * agent's court). Last message outbound => "awaiting_reply", hardening into
+ * "no_reply" after QUIET_MS. Returns null age when there are no messages yet.
+ */
+export async function responsiveness(
+  agentId: string,
+  leadId: number,
+): Promise<{ state: Responsiveness; last_direction: "in" | "out" | null; silent_ms: number | null }> {
+  const { data } = await db
+    .from("messages")
+    .select("direction, ts")
+    .eq("agent_id", agentId)
+    .eq("lead_id", leadId)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const last = data as { direction: "in" | "out"; ts: string } | null;
+
+  if (!last) return { state: "active", last_direction: null, silent_ms: null };
+  if (last.direction === "in") {
+    return { state: "active", last_direction: "in", silent_ms: null };
+  }
+  // Outbound last: measure how long the lead has been silent. Postgres returns
+  // ts as an ISO-8601 timestamptz, so Date.parse handles the zone directly.
+  const silent = Date.now() - Date.parse(last.ts);
+  return {
+    state: silent >= QUIET_MS ? "no_reply" : "awaiting_reply",
+    last_direction: "out",
+    silent_ms: silent,
+  };
 }
