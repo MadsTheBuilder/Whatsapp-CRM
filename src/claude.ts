@@ -33,6 +33,11 @@ const FALLBACKS = (process.env.MODEL_FALLBACKS ?? "")
 export const MODEL = PRIMARY;
 const MODEL_CHAIN = [PRIMARY, ...FALLBACKS.filter((m) => m !== PRIMARY)];
 
+// Voice quality is model-bound: the reply call gets its own (bigger) model, while
+// qualify/summarize stay on the cheap PRIMARY. One-line env swap to A/B by ear.
+// Undefined → reply call uses PRIMARY too (no separate model configured).
+export const REPLY_MODEL = process.env.REPLY_MODEL || undefined;
+
 /**
  * One structured call: force a tool with `schema` as its arguments, return the
  * parsed arguments. Tries each model in MODEL_CHAIN until one answers — free
@@ -42,11 +47,15 @@ export async function structured<T>(
   system: string,
   user: string,
   schema: Anthropic.Tool.InputSchema,
+  model?: string, // override the default model for this one call (e.g. a bigger reply model)
 ): Promise<T> {
-  if (IS_OLLAMA) return ollamaStructured<T>(system, user, schema);
+  if (IS_OLLAMA) return ollamaStructured<T>(system, user, schema, model);
 
+  // An override skips the fallback chain — it's a deliberate pick, not the flaky
+  // free-tier chain. Falls back to the chain only when no override is given.
+  const chain = model ? [model] : MODEL_CHAIN;
   let lastErr: unknown;
-  for (const model of MODEL_CHAIN) {
+  for (const model of chain) {
     try {
       const res = (await client.chat.completions.create({
         model,
@@ -93,25 +102,47 @@ async function ollamaStructured<T>(
   system: string,
   user: string,
   schema: Anthropic.Tool.InputSchema,
+  model?: string,
 ): Promise<T> {
-  const res = await fetch(OLLAMA_CHAT, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: PRIMARY,
-      stream: false,
-      format: schema,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`ollama ${res.status}: ${await res.text()}`);
-  const data = (await res.json()) as { message?: { content?: string } };
-  const content = data.message?.content;
-  if (!content) throw new Error("ollama: empty response");
-  return JSON.parse(content) as T; // format:schema guarantees valid JSON
+  // A loaded local model intermittently returns an empty body (seen live: an
+  // inbound suggestion silently vanished mid-distill). Empties are transient, so
+  // retry a few times with a short backoff before giving up — one guard here
+  // covers every caller (qualify/summarize/replies/distill).
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      // No per-request timeout on fetch means a wedged local model hangs the
+      // whole inbound forever with no throw and no log (seen live: line stalled
+      // silently). Abort after 120s so a hang becomes a catchable error the retry
+      // loop can act on. gemma is slow, so this is generous.
+      const res = await fetch(OLLAMA_CHAT, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(120_000),
+        body: JSON.stringify({
+          model: model ?? PRIMARY,
+          stream: false,
+          format: schema,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error(`ollama ${res.status}: ${await res.text()}`);
+      const data = (await res.json()) as { message?: { content?: string } };
+      const content = data.message?.content;
+      if (!content) throw new Error("ollama: empty response");
+      return JSON.parse(content) as T; // format:schema guarantees valid JSON
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) {
+        console.warn(`[claude] ollama attempt ${attempt}/3 failed (${errMsg(err)}), retrying...`);
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
+  }
+  throw new Error(`ollama: all 3 attempts failed. last: ${errMsg(lastErr)}`);
 }
 
 function errMsg(e: unknown): string {

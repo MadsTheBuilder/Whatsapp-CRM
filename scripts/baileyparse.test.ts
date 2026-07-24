@@ -8,6 +8,7 @@ import assert from "node:assert";
 process.env.SUPABASE_URL ??= "http://localhost:54321";
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "dummy";
 process.env.AGENT_ID = "agent_test";
+process.env.COMPANY_BOT_NUMBER = "971581137568"; // bot's own number — must be dropped
 
 const { toEvent, jidToNumber, messageText } = await import("../src/pipe/baileys.js");
 
@@ -43,6 +44,7 @@ assert.deepStrictEqual(inbound, {
   timestamp: 1_700_000_000_000,
   waId: "AAA",
   leadName: "Ahmed",
+  lid: undefined, // classic @s.whatsapp.net chat — no lid
 });
 
 // --- toEvent: a @lid message resolves the real phone from senderPn ---
@@ -61,19 +63,20 @@ const lidEvent = toEvent(
 );
 assert.strictEqual(lidEvent?.leadNumber, "919717662666", "@lid resolves phone from senderPn");
 assert.strictEqual(lidEvent?.direction, "in");
+assert.strictEqual(lidEvent?.lid, "7232909500553", "inbound @lid carries the lid so the link can be learned");
 
-// --- toEvent: @lid with no senderPn falls back to the lid's own id (still a valid key) ---
-assert.strictEqual(
-  toEvent(
-    mk({
-      key: { remoteJid: "7232909500553@lid", fromMe: false, id: "LID2" },
-      message: { conversation: "hello" },
-      messageTimestamp: 1_700_000_000,
-    }),
-  )?.leadNumber,
-  "7232909500553",
-  "@lid without senderPn falls back to the lid id",
+// --- toEvent: @lid with no senderPn (outbound) is NO LONGER dropped — it carries
+// the lid so the brain resolves the lead by lid (leadNumber == lid as a stand-in). ---
+const lidOnly = toEvent(
+  mk({
+    key: { remoteJid: "7232909500553@lid", fromMe: true, id: "LID2" },
+    message: { conversation: "hello" },
+    messageTimestamp: 1_700_000_000,
+  }),
 );
+assert.strictEqual(lidOnly?.lid, "7232909500553", "lid-only message carries the lid");
+assert.strictEqual(lidOnly?.leadNumber, "7232909500553", "lid-only leadNumber stands in as the lid");
+assert.strictEqual(lidOnly?.direction, "out");
 
 // --- toEvent: fromMe → "out" (agent's own reply) ---
 assert.strictEqual(
@@ -107,6 +110,19 @@ assert.strictEqual(
   toEvent(mk({ key: { remoteJid: "971500000001@s.whatsapp.net" }, message: { conversation: "   " } })),
   null,
   "whitespace-only must drop",
+);
+
+// --- toEvent: the bot's OWN number is dropped (else it loops on its own cards) ---
+assert.strictEqual(
+  toEvent(
+    mk({
+      key: { remoteJid: "971581137568@s.whatsapp.net", id: "CCC" },
+      message: { conversation: "New message from ...\n\nSuggested replies:\n1. ..." },
+      messageTimestamp: 1_700_000_200,
+    }),
+  ),
+  null,
+  "bot's own chat must drop",
 );
 
 console.log("baileys parse self-check passed");

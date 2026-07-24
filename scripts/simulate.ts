@@ -44,6 +44,7 @@ async function main() {
   console.log("  budget      :", lead.budget);
   console.log("  area        :", lead.area);
   console.log("  requirement :", lead.requirement);
+  console.log("  timeline    :", lead.timeline);
   console.log("  next question:", lead.next_question);
   console.log("\n4 suggested replies:");
   replies.forEach((r, i) => console.log(`  ${i + 1}. ${r}`));

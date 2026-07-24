@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { structured } from "./claude.js";
+import { structured, REPLY_MODEL } from "./claude.js";
 import type { Message, Stage } from "./store.js";
 import type { Qualification } from "./qualify.js";
 import type { ListingSummary } from "./listings.js";
@@ -10,15 +10,19 @@ Given the conversation, the relationship stage, and what's already known about t
 
 Persona: calm, clear, professional — never salesy, never pushy, never sounds like a script.
 Voice: real Dubai-agent WhatsApp tone — warm, human, professional, never robotic or corporate.
-Real examples of the tone: "give me a call when you're free", "just tried reaching you, seems you're busy".
+If real examples of THIS agent's own messages are provided below, mirror their voice — sentence length, greetings, sign-offs, emoji habits, the way they actually phrase things. Those samples outrank any generic idea of "professional"; sound like that specific person, not a polished template.
 Test for every option: would a thoughtful human agent, who isn't in a hurry to close, actually send this?
 
-Discovery first — this is the most important rule:
-- You'll be told which of budget/area/requirement are still unknown. Do not suggest a specific area, property, or price point for any field still marked unknown — guessing signals you weren't listening.
-- While fields are unknown, at least some of the 4 options should be natural discovery questions aimed at them. Not all 4 need to be questions — vary them — but none should presume an unstated fact.
-- Once all three are known, replies can move toward concrete suggestions and next steps.
+Grounding — the hard rule. You'll be given a list of ANSWERED facts and a list of what's still UNKNOWN:
+- Never RE-ASK a fact that's in the ANSWERED list. If the lead already told you their budget, area, deal type, beds, or timeline, treat it as settled — asking again signals you weren't listening.
+- Never ASSERT a fact that isn't in the ANSWERED list. Do not name a specific area, property, price, unit type, or amenity for anything marked UNKNOWN — guessing is worse than asking.
+- These lists are the ground truth, not your memory of the transcript. Key every option off them.
 
-Reading buying timeline: never ask a direct checklist question like "what's your timeline?" or "are you a serious buyer?". Instead, when it fits, gently probe with an easy out, e.g. "no rush at all, just curious — looking to move soon or more exploring for now?". Read urgency from what the lead has already said (a deadline, a lease ending, logistics questions), never from an interrogation.
+Discovery first:
+- While fields are UNKNOWN, at least some of the 4 options should be natural discovery questions aimed at them. Not all 4 need to be questions — vary them — but none should presume an unstated fact.
+- Once budget/area/requirement are all known, replies can move toward concrete suggestions and next steps.
+
+Reading buying timeline: if timeline is in the ANSWERED list, the lead has already told you when they're moving — do NOT ask about it again; instead reflect it back naturally where it fits ("makes sense with your lease ending then"). Only if timeline is UNKNOWN may you gently probe, and never as a checklist question ("what's your timeline?", "are you a serious buyer?") — use an easy out, e.g. "no rush at all, just curious — looking to move soon or more exploring for now?". Read urgency from what the lead said, never from an interrogation.
 
 Urgency and curiosity must come only from the conversation itself — never invent market data, scarcity, or stats you can't verify. Reflect the lead's own stated timeline back to them, or open a curiosity gap ("I've got a couple of thoughts on that area, want me to share?") — never manufacture pressure.
 
@@ -48,14 +52,51 @@ function transcript(messages: Message[]): string {
     .join("\n");
 }
 
-function knownFields(q?: Pick<Qualification, "budget" | "area" | "requirement">): string {
-  const field = (label: string, v: string | null | undefined) =>
-    `${label}: ${v ?? "unknown"}`;
-  return [
-    field("budget", q?.budget),
-    field("area", q?.area),
-    field("requirement", q?.requirement),
-  ].join(", ");
+// The discrete answered-field set the reply model keys its grounding rule off.
+// Passed as two explicit lists (ANSWERED / UNKNOWN) so the model never re-asks a
+// stated fact nor asserts an unstated one — the input-contract fix. `requirement`
+// is intentionally omitted: it's just deal_type/unit_type/beds joined, already here.
+type QualFields = Pick<
+  Qualification,
+  "budget" | "area" | "deal_type" | "unit_type" | "beds" | "timeline"
+>;
+const FIELD_LABELS: [keyof QualFields, string][] = [
+  ["budget", "budget"],
+  ["area", "area"],
+  ["deal_type", "buy or rent"],
+  ["unit_type", "property type"],
+  ["beds", "bedrooms"],
+  ["timeline", "move-in timeline"],
+];
+
+function groundingBlock(q?: QualFields): string {
+  const answered: string[] = [];
+  const unknown: string[] = [];
+  for (const [key, label] of FIELD_LABELS) {
+    const v = q?.[key];
+    if (v) answered.push(`${label}: ${v}`);
+    else unknown.push(label);
+  }
+  return (
+    `ANSWERED (never re-ask): ${answered.length ? answered.join(" · ") : "nothing yet"}\n` +
+    `UNKNOWN (never assert): ${unknown.length ? unknown.join(", ") : "all captured"}`
+  );
+}
+
+// Layer 3: a handful of the agent's own recent texts, verbatim, so the model
+// mirrors THIS agent's voice instead of a generic one. Empty until the agent has
+// sent messages (cold start → generic voice, never worse than today).
+function samplesBlock(samples: string[]): string {
+  if (!samples.length) return "";
+  const lines = samples.map((s) => `- ${s}`).join("\n");
+  return `\nHow THIS agent actually writes (recent real messages — mirror this voice, don't copy the content):\n${lines}\n`;
+}
+
+// Layer 2: the agent's onboarding voice card (markdown blob from the role-play
+// skill). Distilled intent — rides ahead of live samples. Empty until onboarded.
+// Exported for the self-check (scripts/voicecard.test.ts).
+export function voiceCardBlock(card: string): string {
+  return card.trim() ? `\n${card.trim()}\n` : "";
 }
 
 function listingsBlock(listings: ListingSummary[]): string {
@@ -66,19 +107,22 @@ function listingsBlock(listings: ListingSummary[]): string {
   return `\nMatching listings found:\n${lines.join("\n")}\n`;
 }
 
-/** Generate exactly 4 stage-aware human-worded reply options. */
+/** Generate exactly 4 stage-aware human-worded reply options in the agent's voice. */
 export async function suggestReplies(
   messages: Message[],
   stage: Stage,
   memory = "",
-  qualification?: Pick<Qualification, "budget" | "area" | "requirement">,
+  qualification?: QualFields,
   listings: ListingSummary[] = [],
+  card = "",
+  samples: string[] = [],
 ): Promise<string[]> {
   const convo = transcript(messages);
   const { replies } = await structured<{ replies: string[] }>(
     SYSTEM,
-    `${memory}Relationship stage: ${stage}\nKnown so far — ${knownFields(qualification)}\n${listingsBlock(listings)}\nConversation so far:\n${convo}`,
+    `${memory}Relationship stage: ${stage}\n${groundingBlock(qualification)}\n${voiceCardBlock(card)}${samplesBlock(samples)}${listingsBlock(listings)}\nConversation so far:\n${convo}`,
     SCHEMA,
+    REPLY_MODEL, // route the voice-critical call to its own (bigger) model
   );
   // Guarantee exactly 4 — the demo's self-check asserts this.
   // ponytail: hard-slice/pad rather than re-prompt; re-prompt if quality bites.

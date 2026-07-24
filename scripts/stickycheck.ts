@@ -26,6 +26,7 @@ const id = (leadRow as { id: number }).id;
 // 1. First pass extracts area=JVC, budget=1.4M.
 await updateLeadQualification(AGENT, id, {
   budget: "1.4M", area: "JVC", requirement: null,
+  deal_type: null, unit_type: null, beds: null, timeline: null,
   stage: "following_up", next_question: null, replies: [],
 });
 let lead = (await getLead(AGENT, id))!;
@@ -35,6 +36,7 @@ assert.equal(lead.budget, "1.4M", "budget set on first pass");
 // 2. Model thrashes: this pass returns area=null. Known value must survive.
 await updateLeadQualification(AGENT, id, {
   budget: null, area: null, requirement: "off-plan 2BR",
+  deal_type: null, unit_type: null, beds: null, timeline: null,
   stage: "deep", next_question: null, replies: [],
 });
 lead = (await getLead(AGENT, id))!;
@@ -45,6 +47,7 @@ assert.equal(lead.requirement, "off-plan 2BR", "new non-null requirement landed"
 // 3. Real correction: lead changes area to Marina (non-null) — must overwrite.
 await updateLeadQualification(AGENT, id, {
   budget: null, area: "Dubai Marina", requirement: null,
+  deal_type: null, unit_type: null, beds: null, timeline: null,
   stage: "deep", next_question: null, replies: [],
 });
 lead = (await getLead(AGENT, id))!;

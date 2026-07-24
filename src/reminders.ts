@@ -1,5 +1,14 @@
-import { listLeads, responsiveness, type Lead } from "./store.js";
+import { listLeads, responsiveness, setPipeline, type Lead, type Pipeline } from "./store.js";
 import { notifyAgent } from "./notify.js";
+
+// Only auto-demote a silent lead to no_reply from these early/neutral stages.
+// Never clobber a stage the agent set deliberately (eoi/deal_closed/waste) or
+// re-mark one already there.
+const AUTO_NOREPLY_FROM: ReadonlySet<Pipeline> = new Set<Pipeline>([
+  "new",
+  "qualifies",
+  "details_sent",
+]);
 
 const AGENT_ID = process.env.AGENT_ID ?? "agent_demo";
 
@@ -60,6 +69,13 @@ export async function runDailyReminders(): Promise<string | null> {
   for (const lead of leads) {
     const r = await responsiveness(AGENT_ID, lead.id);
     states.push({ lead, last_direction: r.last_direction, silent_ms: r.silent_ms });
+
+    // Auto-demote to no_reply once the lead has gone silent past the store's
+    // 24h window, but only from an early/neutral stage — never overwrite an
+    // agent-set eoi/deal_closed/waste, and skip leads already at no_reply.
+    if (r.state === "no_reply" && AUTO_NOREPLY_FROM.has(lead.pipeline)) {
+      await setPipeline(AGENT_ID, lead.id, "no_reply");
+    }
   }
 
   const digest = buildDigest(selectStale(states));

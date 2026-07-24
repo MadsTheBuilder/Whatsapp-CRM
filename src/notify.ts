@@ -9,6 +9,8 @@
  * path) and auth is a raw D360-API-KEY header.
  */
 
+import { PIPELINES, PIPELINE_LABELS } from "./store.js";
+
 /** Send a WhatsApp text to `to` (E.164, no +) via 360dialog. Resolves when accepted. */
 async function companySend(to: string, body: string): Promise<void> {
   const apiKey = process.env.DIALOG360_API_KEY;
@@ -79,5 +81,49 @@ export async function askApproval(phone: string, name?: string): Promise<void> {
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`360dialog approval prompt failed (${res.status}): ${detail}`);
+  }
+}
+
+/**
+ * Ask the agent (company number) to set a newly-qualified lead's funnel stage, as a
+ * WhatsApp interactive LIST message — one tappable row per pipeline value. Buttons
+ * cap at 3, so a list (up to 10 rows) is the only shape that fits all 8 stages. Each
+ * row id carries the phone + pipeline, so a tap is unambiguous and comes back as a
+ * distinct list_reply type. `qualLine` is a short readback like "rent · 1BR · JVC ·
+ * ~AED 80k/yr". No silent auto-move — the agent always taps. (360dialog mirrors
+ * Meta's Cloud API list-message shape.)
+ */
+export async function askStage(phone: string, name: string | null, qualLine: string): Promise<void> {
+  const apiKey = process.env.DIALOG360_API_KEY;
+  const baseUrl = process.env.DIALOG360_API_URL;
+  const to = process.env.AGENT_COMPANY_NUMBER;
+  if (!apiKey || !baseUrl) throw new Error("DIALOG360_API_KEY and DIALOG360_API_URL must be set");
+  if (!to) throw new Error("AGENT_COMPANY_NUMBER must be set");
+
+  const who = name ? `${name} (+${phone})` : `+${phone}`;
+  const rows = PIPELINES.map((p) => ({
+    id: `stage:${phone}:${p}`, // comes back on tap — encode phone + pipeline
+    title: PIPELINE_LABELS[p], // ≤24 chars (enforced by the label map)
+  }));
+  const res = await fetch(`${baseUrl}/messages`, {
+    method: "POST",
+    headers: { "D360-API-KEY": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: `${who} looks qualified (${qualLine}). Set their stage:` },
+        action: {
+          button: "Choose stage",
+          sections: [{ title: "Pipeline", rows }],
+        },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`360dialog stage prompt failed (${res.status}): ${detail}`);
   }
 }

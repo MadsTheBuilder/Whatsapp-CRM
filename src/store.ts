@@ -13,6 +13,42 @@ const db = createClient(url, key, { auth: { persistSession: false } });
 
 export type Stage = "first_contact" | "following_up" | "deep";
 
+// Sales funnel stage — distinct from `stage` (conversation-depth, drives tone).
+// Ordered as the columns render on the board.
+export type Pipeline =
+  | "new"
+  | "no_reply"
+  | "qualifies"
+  | "details_sent"
+  | "meeting_done"
+  | "eoi"
+  | "deal_closed"
+  | "waste";
+
+export const PIPELINES: Pipeline[] = [
+  "new",
+  "no_reply",
+  "qualifies",
+  "details_sent",
+  "meeting_done",
+  "eoi",
+  "deal_closed",
+  "waste",
+];
+
+// Human-readable labels (WhatsApp list rows, confirmation DMs). Titles ≤24 chars
+// per the list-message row limit. Keep in sync with Pipeline.
+export const PIPELINE_LABELS: Record<Pipeline, string> = {
+  new: "New",
+  no_reply: "No reply",
+  qualifies: "Qualifies",
+  details_sent: "Details sent",
+  meeting_done: "Meeting done",
+  eoi: "EOI",
+  deal_closed: "Deal closed",
+  waste: "Waste lead",
+};
+
 // Approval gate: a number the read-pipe sees is only processed once the agent
 // opts it in. New numbers land 'pending'; the agent taps Yes/No to approve/reject.
 export type Monitor = "pending" | "approved" | "rejected";
@@ -21,12 +57,18 @@ export interface Lead {
   id: number;
   agent_id: string;
   phone: string;
+  lid: string | null; // opaque @lid contact id, learned from inbound; resolves outbound @lid
   name: string | null;
   stage: Stage;
+  pipeline: Pipeline;
   monitor: Monitor;
   budget: string | null;
   area: string | null;
   requirement: string | null;
+  deal_type: string | null;
+  unit_type: string | null;
+  beds: string | null;
+  timeline: string | null;
   status: string;
   next_question: string | null;
   replies_json: string | null;
@@ -54,6 +96,31 @@ export async function findLeadByPhone(agentId: string, phone: string): Promise<L
     .eq("phone", phone)
     .maybeSingle();
   return (data as Lead) ?? undefined;
+}
+
+/** Look up a lead by its opaque @lid, or undefined. Used for outbound @lid
+ *  messages that carry no phone — the lead's lid was learned from an earlier
+ *  inbound (which carries both lid + phone). */
+export async function findLeadByLid(agentId: string, lid: string): Promise<Lead | undefined> {
+  const { data } = await db
+    .from("leads")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("lid", lid)
+    .maybeSingle();
+  return (data as Lead) ?? undefined;
+}
+
+/** Persist the learned lid on a lead, only while it's still null (never thrash a
+ *  stored lid). Keyed by id; no-op if the lead already has one. */
+export async function setLeadLid(agentId: string, id: number, lid: string): Promise<void> {
+  const { error } = await db
+    .from("leads")
+    .update({ lid, updated_at: new Date().toISOString() })
+    .eq("agent_id", agentId)
+    .eq("id", id)
+    .is("lid", null);
+  if (error) throw error;
 }
 
 /** Create a lead in 'pending' so it's remembered as awaiting approval. `created`
@@ -97,6 +164,81 @@ export async function setMonitor(
   return (data?.length ?? 0) > 0;
 }
 
+/** Move a lead to a funnel stage (dashboard drag/dropdown or WhatsApp `stage`
+ *  command). Keyed by id. Returns false if no such lead — so the caller can tell
+ *  the agent "no lead there" instead of silently succeeding. */
+export async function setPipeline(
+  agentId: string,
+  id: number,
+  pipeline: Pipeline,
+): Promise<boolean> {
+  const { data, error } = await db
+    .from("leads")
+    .update({ pipeline, updated_at: new Date().toISOString() })
+    .eq("agent_id", agentId)
+    .eq("id", id)
+    .select("id");
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
+export interface AgentSummary {
+  agent_id: string;
+  total: number;
+  qualified: number; // qualifies + further down the funnel — leads worth working
+  no_reply: number;
+}
+
+/** One row per agent with aggregate counts over approved leads, for the
+ *  dashboard cards. For one agent it returns one row — correct. */
+export async function listAgents(): Promise<AgentSummary[]> {
+  const { data, error } = await db
+    .from("leads")
+    .select("agent_id, pipeline")
+    .eq("monitor", "approved");
+  if (error) throw error;
+  const rows = (data as { agent_id: string; pipeline: Pipeline }[]) ?? [];
+
+  // "qualified" = past the top of the funnel (anything the agent is actively
+  // working), excluding no_reply and waste dead-ends.
+  const qualifiedStages = new Set<Pipeline>([
+    "qualifies",
+    "details_sent",
+    "meeting_done",
+    "eoi",
+    "deal_closed",
+  ]);
+  const byAgent = new Map<string, AgentSummary>();
+  for (const r of rows) {
+    let s = byAgent.get(r.agent_id);
+    if (!s) {
+      s = { agent_id: r.agent_id, total: 0, qualified: 0, no_reply: 0 };
+      byAgent.set(r.agent_id, s);
+    }
+    s.total++;
+    if (qualifiedStages.has(r.pipeline)) s.qualified++;
+    if (r.pipeline === "no_reply") s.no_reply++;
+  }
+  return [...byAgent.values()];
+}
+
+export interface BoardLead extends Lead {
+  responsiveness: Responsiveness; // live active/awaiting/no_reply badge (not the grouping)
+}
+
+/** Approved leads for an agent, each tagged with its live responsiveness so the
+ *  card can show an active/awaiting dot. Board GROUPING is by the stored
+ *  `pipeline` column (done on the client); this only adds the live badge. */
+export async function leadsForBoard(agentId: string): Promise<BoardLead[]> {
+  const leads = await listLeads(agentId);
+  const out: BoardLead[] = [];
+  for (const lead of leads) {
+    const r = await responsiveness(agentId, lead.id);
+    out.push({ ...lead, responsiveness: r.state });
+  }
+  return out;
+}
+
 export async function getLead(agentId: string, id: number): Promise<Lead | undefined> {
   const { data } = await db
     .from("leads")
@@ -122,6 +264,10 @@ export async function updateLeadQualification(
     budget: string | null;
     area: string | null;
     requirement: string | null;
+    deal_type: string | null;
+    unit_type: string | null;
+    beds: string | null;
+    timeline: string | null;
     stage: Stage;
     next_question: string | null;
     replies: string[];
@@ -137,6 +283,10 @@ export async function updateLeadQualification(
   if (fields.budget !== null) update.budget = fields.budget;
   if (fields.area !== null) update.area = fields.area;
   if (fields.requirement !== null) update.requirement = fields.requirement;
+  if (fields.deal_type !== null) update.deal_type = fields.deal_type;
+  if (fields.unit_type !== null) update.unit_type = fields.unit_type;
+  if (fields.beds !== null) update.beds = fields.beds;
+  if (fields.timeline !== null) update.timeline = fields.timeline;
 
   const { error } = await db.from("leads").update(update).eq("agent_id", agentId).eq("id", id);
   if (error) throw error;
@@ -161,6 +311,197 @@ export async function saveMessage(
     throw error;
   }
   return true;
+}
+
+/**
+ * Layer-3 voice samples: the agent's own recent outbound texts, across all their
+ * leads, for few-shot conditioning of the reply model. Filters out messages the
+ * agent likely just copied from one of OUR suggestions (exact match against that
+ * lead's stored replies_json) — else the system learns to imitate its own AI voice.
+ * ponytail: replies_json holds only the LATEST 4 per lead, so this catches the
+ * common "copied the last suggestion" case, not every historical copy. Full
+ * suggestion-history filtering waits for Workstream B (response-rate labeling).
+ */
+
+/** Normalize a message for copy-detection: lowercase, collapse internal
+ *  whitespace, strip leading/trailing punctuation. Agents copy a suggestion with
+ *  tiny edits (a trailing period, an extra space, a linebreak) — exact matching
+ *  misses those and the card learns the AI's own voice back. Exported for the
+ *  self-check. ponytail: normalization only; add fuzzy similarity if drift shows. */
+export function normalizeForCopyCheck(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, "")
+    .trim();
+}
+
+/** Pure core of recentAgentSamples: keep the first `limit` outbound bodies that
+ *  aren't copies of a suggestion. `suggested` must already be normalized (via
+ *  normalizeForCopyCheck). Exported for the self-check. */
+export function filterVoiceSamples(
+  bodies: string[],
+  suggested: Set<string>,
+  limit: number,
+): string[] {
+  const out: string[] = [];
+  for (const b of bodies) {
+    const body = b.trim();
+    if (body && !suggested.has(normalizeForCopyCheck(b))) out.push(body);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Normalized set of every suggestion we ever stored for these leads (from their
+ *  replies_json). Used to drop outbound messages the agent just copied from us.
+ *  ponytail: replies_json holds only the LATEST 4 per lead — catches the common
+ *  "copied the last suggestion" case, not every historical copy (Workstream B). */
+async function suggestedRepliesFor(agentId: string, leadIds: number[]): Promise<Set<string>> {
+  const suggested = new Set<string>();
+  if (!leadIds.length) return suggested;
+  const { data: leadRows } = await db
+    .from("leads")
+    .select("id, replies_json")
+    .eq("agent_id", agentId)
+    .in("id", leadIds);
+  for (const l of (leadRows as { id: number; replies_json: string | null }[]) ?? []) {
+    if (!l.replies_json) continue;
+    try {
+      for (const r of JSON.parse(l.replies_json) as string[]) {
+        const t = normalizeForCopyCheck(r);
+        if (t) suggested.add(t);
+      }
+    } catch {
+      /* malformed json — skip this lead's filter */
+    }
+  }
+  return suggested;
+}
+
+export async function recentAgentSamples(agentId: string, limit = 15): Promise<string[]> {
+  // Pull a bit extra so filtering copies still leaves ~limit real ones.
+  const { data, error } = await db
+    .from("messages")
+    .select("body, lead_id")
+    .eq("agent_id", agentId)
+    .eq("direction", "out")
+    .order("id", { ascending: false })
+    .limit(limit * 3);
+  if (error) throw error;
+  const rows = (data as { body: string; lead_id: number }[]) ?? [];
+  if (!rows.length) return [];
+
+  const leadIds = [...new Set(rows.map((r) => r.lead_id))];
+  const suggested = await suggestedRepliesFor(agentId, leadIds);
+  return filterVoiceSamples(rows.map((r) => r.body), suggested, limit);
+}
+
+// The distill job folds at most this many real messages per run. "All unseen
+// since card_upto" is unbounded — if the job breaks for a week or card_upto is
+// 0, one prompt could balloon. Cap it; surplus folds on the next outbound trigger.
+export const DISTILL_BATCH_MAX = 60;
+
+/** Outbound messages the agent hand-sent since `sinceId`, oldest→newest, with
+ *  their ids (to advance card_upto), minus verbatim/near-verbatim copies of our
+ *  own suggestions. Capped at DISTILL_BATCH_MAX. The `capped` flag is true when
+ *  more rows remained past the cap (for observability). Returns [] when nothing new. */
+export async function unfoldedAgentSamples(
+  agentId: string,
+  sinceId: number,
+): Promise<{ samples: { id: number; body: string }[]; capped: boolean }> {
+  // Pull one extra past the cap so we can tell "exactly full" from "more remain".
+  // Note: filtered copies below can shrink this under the cap even when capped is
+  // true — acceptable, the surplus folds next trigger regardless.
+  const { data, error } = await db
+    .from("messages")
+    .select("id, body, lead_id")
+    .eq("agent_id", agentId)
+    .eq("direction", "out")
+    .gt("id", sinceId)
+    .order("id", { ascending: true })
+    .limit(DISTILL_BATCH_MAX + 1);
+  if (error) throw error;
+  const rows = (data as { id: number; body: string; lead_id: number }[]) ?? [];
+  if (!rows.length) return { samples: [], capped: false };
+
+  const capped = rows.length > DISTILL_BATCH_MAX;
+  const batch = rows.slice(0, DISTILL_BATCH_MAX);
+  const leadIds = [...new Set(batch.map((r) => r.lead_id))];
+  const suggested = await suggestedRepliesFor(agentId, leadIds);
+  const samples = batch.filter((r) => {
+    const body = r.body.trim();
+    return body && !suggested.has(normalizeForCopyCheck(r.body));
+  });
+  return { samples: samples.map((r) => ({ id: r.id, body: r.body })), capped };
+}
+
+// Layer 2: the agent's persisted voice card (markdown blob) seeded by the
+// role-play onboarding skill. Empty string = no card yet → generic fallback.
+export async function getVoiceCard(agentId: string): Promise<string> {
+  const { data } = await db
+    .from("agent_persona")
+    .select("voice_card")
+    .eq("agent_id", agentId)
+    .maybeSingle();
+  return (data?.voice_card as string | null) ?? "";
+}
+
+/** Card + watermark for the distill job. Missing row → { card: "", upto: 0 }
+ *  (cold start). getVoiceCard stays lean for the hot reply path. */
+export async function getVoiceCardState(
+  agentId: string,
+): Promise<{ card: string; upto: number }> {
+  const { data } = await db
+    .from("agent_persona")
+    .select("voice_card, card_upto")
+    .eq("agent_id", agentId)
+    .maybeSingle();
+  const row = data as { voice_card: string | null; card_upto: number } | null;
+  return { card: row?.voice_card ?? "", upto: row?.card_upto ?? 0 };
+}
+
+/** Highest outbound message id for an agent, across all leads (0 if none). Used
+ *  to set card_upto = current baseline when the seed card is saved, so the first
+ *  distill folds only FUTURE messages, not the whole back-catalogue. */
+export async function maxOutboundId(agentId: string): Promise<number> {
+  const { data } = await db
+    .from("messages")
+    .select("id")
+    .eq("agent_id", agentId)
+    .eq("direction", "out")
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.id as number | null) ?? 0;
+}
+
+/** Overwrite the agent's voice card and advance the watermark, and log the change
+ *  to agent_persona_versions (rollback + drift audit). Upsert so it also seeds a
+ *  fresh row. The version row is written first: if the log insert fails we abort
+ *  before mutating the live card, so we never have an untracked overwrite. */
+export async function saveVoiceCard(
+  agentId: string,
+  card: string,
+  upto: number,
+  meta: { fromUpto: number; sampleCount: number },
+): Promise<void> {
+  const prior = await getVoiceCardState(agentId);
+  const { error: logErr } = await db.from("agent_persona_versions").insert({
+    agent_id: agentId,
+    prior_card: prior.card || null,
+    new_card: card,
+    from_upto: meta.fromUpto,
+    to_upto: upto,
+    sample_count: meta.sampleCount,
+  });
+  if (logErr) throw logErr;
+
+  const { error } = await db.from("agent_persona").upsert(
+    { agent_id: agentId, voice_card: card, card_upto: upto, updated_at: new Date().toISOString() },
+    { onConflict: "agent_id" },
+  );
+  if (error) throw error;
 }
 
 export async function getMessages(agentId: string, leadId: number): Promise<Message[]> {

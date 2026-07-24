@@ -1,11 +1,15 @@
 import {
   findLeadByPhone,
+  findLeadByLid,
+  setLeadLid,
   createPendingLead,
   saveMessage,
   getMessages,
   getFacts,
   saveMemory,
   updateLeadQualification,
+  recentAgentSamples,
+  getVoiceCard,
   type Lead,
   type Stage,
 } from "./store.js";
@@ -13,7 +17,8 @@ import { qualify } from "./qualify.js";
 import { suggestReplies } from "./replies.js";
 import { summarize, memoryBlock } from "./memory.js";
 import { findMatchingListings, type ListingSummary } from "./listings.js";
-import { notifyAgent, askApproval } from "./notify.js";
+import { notifyAgent, askApproval, askStage } from "./notify.js";
+import { maybeDistillVoiceCard } from "./distill.js";
 import type { AgentMessageEvent } from "./pipe/types.js";
 
 // Below this many messages the raw transcript is enough — no point compressing.
@@ -46,8 +51,19 @@ export async function handleAgentMessage(ev: AgentMessageEvent): Promise<number>
   // number) and its message DROPPED — pending/rejected numbers drop silently too,
   // nothing is stored, until the agent approves. This is the pipe-agnostic seam,
   // so 360dialog gets the same gate for free when it replaces Baileys.
-  let lead: Lead | undefined = await findLeadByPhone(ev.agentId, ev.leadNumber);
+  // A lid-only message (outbound @lid) has no phone — leadNumber is the lid
+  // digits. Resolve by lid instead; the link was learned from an earlier inbound.
+  const lidOnly = ev.lid !== undefined && ev.leadNumber === ev.lid;
+  let lead: Lead | undefined = lidOnly
+    ? await findLeadByLid(ev.agentId, ev.lid!)
+    : await findLeadByPhone(ev.agentId, ev.leadNumber);
   if (!lead) {
+    // Cold outbound to a never-seen @lid contact: no phone to show the agent and
+    // no inbound to anchor it — drop silently, don't create a pending prompt.
+    if (lidOnly) {
+      console.log(`[brain] drop lid=${ev.lid}: outbound to unlinked @lid contact`); // ponytail: diag
+      return 0;
+    }
     // First sighting: remember it as pending and ask the agent. Don't store the
     // message — buffering is out (decision: drop until approved).
     const { lead: created, created: didCreate } = await createPendingLead(
@@ -64,16 +80,33 @@ export async function handleAgentMessage(ev: AgentMessageEvent): Promise<number>
     }
     return created.id;
   }
-  if (lead.monitor !== "approved") return lead.id; // pending or rejected — drop.
+  // Learn the lid↔phone link: an inbound @lid message carries both. Store the lid
+  // on the lead (only if unset) so the next outbound @lid resolves back to it.
+  if (!lidOnly && ev.lid && !lead.lid) {
+    setLeadLid(ev.agentId, lead.id, ev.lid).catch((e) => console.error("setLeadLid failed:", e));
+  }
+  if (lead.monitor !== "approved") {
+    console.log(`[brain] drop ${ev.leadNumber}: monitor=${lead.monitor} (not approved)`); // ponytail: diag
+    return lead.id; // pending or rejected — drop.
+  }
 
   // A provider re-delivers the same waId on a slow ack; a duplicate is a no-op —
   // stop before re-qualifying and re-writing replies for a message we already have.
   if (!(await saveMessage(ev.agentId, lead.id, ev.direction, ev.text, ev.waId))) {
+    console.log(`[brain] drop ${ev.leadNumber}: duplicate waId=${ev.waId}`); // ponytail: diag
     return lead.id;
   }
 
   // The agent's own reply is stored (above) but needs no suggestion.
-  if (ev.direction === "out") return lead.id;
+  if (ev.direction === "out") {
+    console.log(`[brain] stored out-msg for ${ev.leadNumber}, no card (agent's own reply)`); // ponytail: diag
+    // Threshold-driven voice-card refresh from the agent's real messages. Fire-
+    // and-forget: a slow/failed distill must never touch the read-pipe. Guarded +
+    // gated by DISTILL_THRESHOLD inside, so most calls are a cheap count-and-skip.
+    maybeDistillVoiceCard(ev.agentId).catch((e) => console.error("distill failed:", e));
+    return lead.id;
+  }
+  console.log(`[brain] ${ev.leadNumber} approved+saved — generating card...`); // ponytail: diag
 
   const messages = await getMessages(ev.agentId, lead.id);
   const inboundCount = messages.filter((m) => m.direction === "in").length;
@@ -112,16 +145,49 @@ export async function handleAgentMessage(ev: AgentMessageEvent): Promise<number>
     listings = await findMatchingListings(q);
   }
 
-  const replies = await suggestReplies(recent, stage, memory, q, listings);
+  // Layer 3: mirror the agent's own voice. Agent-wide (voice isn't per-lead),
+  // pulled fresh each reply. Empty for a brand-new agent → generic voice fallback.
+  const voiceCard = await getVoiceCard(ev.agentId);
+  const samples = await recentAgentSamples(ev.agentId);
+  const replies = await suggestReplies(recent, stage, memory, q, listings, voiceCard, samples);
 
   await updateLeadQualification(ev.agentId, lead.id, {
     budget: q.budget,
     area: q.area,
     requirement: q.requirement,
+    deal_type: q.deal_type,
+    unit_type: q.unit_type,
+    beds: q.beds,
+    timeline: q.timeline,
     stage,
     next_question: q.next_question,
     replies,
   });
+
+  // On the turn the 5 qualification criteria first fill up, DM the agent a list
+  // message to set the funnel stage — the agent taps, never a silent auto-move.
+  // Fields are sticky (null keeps prior), so the effective value is q.x ?? lead.x.
+  // Fires once: `wasFull` false + `nowFull` true only on the completing turn, and
+  // only while still `new` (a lead moved off `new` never gets re-prompted). No
+  // separate "already asked" flag needed — same trick as the listings fetch above.
+  const full = (o: { budget: string | null; area: string | null; deal_type: string | null; unit_type: string | null; beds: string | null }) =>
+    o.budget !== null && o.area !== null && o.deal_type !== null && o.unit_type !== null && o.beds !== null;
+  const wasFull = full(lead);
+  const merged = {
+    budget: q.budget ?? lead.budget,
+    area: q.area ?? lead.area,
+    deal_type: q.deal_type ?? lead.deal_type,
+    unit_type: q.unit_type ?? lead.unit_type,
+    beds: q.beds ?? lead.beds,
+  };
+  if (!wasFull && full(merged) && lead.pipeline === "new") {
+    const qualLine = [merged.deal_type, merged.beds, merged.area, merged.budget]
+      .filter(Boolean)
+      .join(" · ");
+    askStage(ev.leadNumber, lead.name, qualLine).catch((e) =>
+      console.error("askStage failed:", e),
+    );
+  }
 
   // Privately DM the agent the lead's message + the 4 options so they can copy one
   // and send it themselves. Goes to the agent on the company number — never the lead.

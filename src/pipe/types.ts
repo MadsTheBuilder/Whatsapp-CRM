@@ -11,4 +11,9 @@ export interface AgentMessageEvent {
   timestamp: number; // ms epoch
   waId?: string; // provider message id for dedup (optional)
   leadName?: string;
+  // Opaque WhatsApp "<id>@lid" contact id (bare digits), set when the chat is a
+  // @lid chat, in BOTH directions. Undefined for classic @s.whatsapp.net chats.
+  // On a lid-only outbound (no senderPn) leadNumber == lid, so the brain must
+  // resolve by lid, not treat the lid digits as a phone.
+  lid?: string;
 }

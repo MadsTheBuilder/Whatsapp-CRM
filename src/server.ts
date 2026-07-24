@@ -1,6 +1,9 @@
 import "dotenv/config"; // MUST be first — store.ts throws at import if SUPABASE_* unset.
 import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { companyRouter } from "./company.js";
+import { apiRouter } from "./api.js";
 import { startBaileys } from "./pipe/baileys.js";
 import { runDailyReminders, REMINDER_INTERVAL_MS } from "./reminders.js";
 
@@ -16,6 +19,15 @@ const PORT = Number(process.env.PORT ?? 3000);
 const app = express();
 app.use(express.json()); // 360dialog posts JSON; companyRouter reads req.body
 app.use(companyRouter);
+app.use(apiRouter); // Control Center read/write API (dashboard) — service-role store only.
+
+// Serve the single-file dashboard. It fetch()es the /api routes above. Run via
+// tsx (no build step), so this file lives at src/server.ts — the mockup is one
+// level up in mockups/. One static html file, no frontend build.
+const dir = path.dirname(fileURLToPath(import.meta.url));
+app.get("/", (_req, res) =>
+  res.sendFile(path.resolve(dir, "..", "mockups", "control-center.html")),
+);
 
 // Read-pipe: connect to the agent's WhatsApp. A boot failure here is fatal —
 // without it the brain never sees a message, so let it crash rather than run blind.

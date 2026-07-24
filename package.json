@@ -8,11 +8,12 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "simulate": "tsx scripts/simulate.ts",
+    "repro": "tsx scripts/repro-november.ts",
     "check": "tsx scripts/simulate.ts --check",
     "memcheck": "tsx scripts/memcheck.ts",
     "respcheck": "tsx scripts/respcheck.ts",
     "stickycheck": "tsx scripts/stickycheck.ts",
-    "test:logic": "tsx scripts/storelogic.test.ts && tsx scripts/baileyparse.test.ts && tsx scripts/qalogic.test.ts && tsx scripts/reminderlogic.test.ts && tsx scripts/approvallogic.test.ts",
+    "test:logic": "tsx scripts/storelogic.test.ts && tsx scripts/baileyparse.test.ts && tsx scripts/qalogic.test.ts && tsx scripts/reminderlogic.test.ts && tsx scripts/approvallogic.test.ts && tsx scripts/stagelogic.test.ts && tsx scripts/qualgate.test.ts && tsx scripts/voicecard.test.ts && tsx scripts/distill.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

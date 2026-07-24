@@ -6,6 +6,8 @@ server.log
 
 # WhatsApp session credentials (Baileys) — live keys for the agent's number. NEVER commit.
 baileys_auth/
+baileys_auth.bak-*/
+baileys_auth.backup*/
 
 # Local runtime logs — not source.
 *.log

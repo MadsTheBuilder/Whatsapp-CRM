@@ -6,7 +6,23 @@ export interface Qualification {
   budget: string | null;
   area: string | null;
   requirement: string | null;
+  deal_type: string | null; // rent | buy
+  unit_type: string | null; // apartment | townhouse | villa | ...
+  beds: string | null; // studio | 1BR | 2BR | ...
+  timeline: string | null; // move-in / buy timing the lead stated ("November", "lease ends in 2 months")
   next_question: string | null;
+}
+
+// The model occasionally emits its chain-of-thought into `budget` instead of a
+// value ("There is no concrete budget stated. I will record..."). A real budget is
+// short and numeric-ish ("AED 80k/yr", "1.4M", "8k/month"); prose is long or reads
+// like reasoning. Reject the latter → null so the next-question logic re-asks.
+export function cleanBudget(budget: string | null): string | null {
+  if (budget === null) return null;
+  const b = budget.trim();
+  if (b.length > 40) return null;
+  if (/there is no|i will record|to maintain|assume|translates to|however/i.test(b)) return null;
+  return b || null;
 }
 
 // The model extracts requirement as three sub-parts (transaction/property_type/
@@ -18,6 +34,7 @@ interface RawQualification {
   transaction: string | null;
   property_type: string | null;
   bedrooms: string | null;
+  timeline: string | null;
   uncertain: string[]; // which of budget/area/requirement were vague when captured
   next_question: string | null;
 }
@@ -33,6 +50,7 @@ EXTRACTION — concrete values only. Record a field only when the lead has state
   - transaction: "buy" or "rent" — only if the lead made this clear. null otherwise.
   - property_type: e.g. "off-plan apartment", "secondary villa", "townhouse". null if not stated.
   - bedrooms: e.g. "2BR", "studio", "3 bed". null if not stated.
+- timeline: when the lead wants to move in or buy, ONLY if they stated it — a date/month ("November", "the 1st"), a horizon ("in a couple of months", "ASAP", "next year"), or a driver that implies timing ("my lease ends in October", "relocating in Q1"). Capture their own words. null if they've given no timing signal. Never ask for this — it's read passively from what they volunteer.
 
 UNCERTAIN — for any of the three logical fields (budget, area, requirement) that you DID capture but where the lead's wording left real ambiguity (e.g. they said "2 mill-ish", or "the marina area" without which marina, or "probably buy"), add that field name ("budget" | "area" | "requirement") to the uncertain array. If a value was stated cleanly, do NOT list it. If a field is null, do NOT list it.
 
@@ -49,6 +67,7 @@ const SCHEMA: Anthropic.Tool.InputSchema = {
     transaction: { type: ["string", "null"] },
     property_type: { type: ["string", "null"] },
     bedrooms: { type: ["string", "null"] },
+    timeline: { type: ["string", "null"] },
     uncertain: { type: "array", items: { type: "string" } },
     next_question: { type: ["string", "null"] },
   },
@@ -58,6 +77,7 @@ const SCHEMA: Anthropic.Tool.InputSchema = {
     "transaction",
     "property_type",
     "bedrooms",
+    "timeline",
     "uncertain",
     "next_question",
   ],
@@ -87,9 +107,13 @@ export async function qualify(
     SCHEMA,
   );
   return {
-    budget: raw.budget,
+    budget: cleanBudget(raw.budget),
     area: raw.area,
     requirement: joinRequirement(raw),
+    deal_type: raw.transaction,
+    unit_type: raw.property_type,
+    beds: raw.bedrooms,
+    timeline: raw.timeline,
     next_question: raw.next_question,
   };
 }
