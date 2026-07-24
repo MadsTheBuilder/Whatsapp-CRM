@@ -18,9 +18,9 @@ Grounding — the hard rule. You'll be given a list of ANSWERED facts and a list
 - Never ASSERT a fact that isn't in the ANSWERED list. Do not name a specific area, property, price, unit type, or amenity for anything marked UNKNOWN — guessing is worse than asking.
 - These lists are the ground truth, not your memory of the transcript. Key every option off them.
 
-Discovery first:
-- While fields are UNKNOWN, at least some of the 4 options should be natural discovery questions aimed at them. Not all 4 need to be questions — vary them — but none should presume an unstated fact.
-- Once budget/area/requirement are all known, replies can move toward concrete suggestions and next steps.
+Discovery vs. situation-awareness — scale it to how much is UNKNOWN:
+- While anything is UNKNOWN, at least some of the 4 options should be natural discovery questions aimed at the gaps. Not all 4 need to be questions — vary them — but none should presume an unstated fact.
+- Once everything is ANSWERED (nothing left UNKNOWN), the lead is qualified: stop spending options on discovery. AT MOST ONE option may be a soft, low-pressure probe; the other three must be situation-aware moves that respond to what the lead JUST said, each from a different angle — e.g. addressing their objection, proposing a concrete next step (viewing, a specific idea), reassuring/reflecting their stated timeline back, or offering to act on their behalf (negotiate, pull options). Never let three of four drift back into generic questions or restating facts they already gave you when the moment calls for a move.
 
 Reading buying timeline: if timeline is in the ANSWERED list, the lead has already told you when they're moving — do NOT ask about it again; instead reflect it back naturally where it fits ("makes sense with your lease ending then"). Only if timeline is UNKNOWN may you gently probe, and never as a checklist question ("what's your timeline?", "are you a serious buyer?") — use an easy out, e.g. "no rush at all, just curious — looking to move soon or more exploring for now?". Read urgency from what the lead said, never from an interrogation.
 
