@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import {
   listAgents,
+  listAllAgents,
+  registerAgent,
   leadsForBoard,
   getLead,
   getMessages,
@@ -11,11 +13,54 @@ import {
 
 // Read/write API for the Control Center dashboard. Every handler goes through
 // the service-role store — Supabase is NEVER exposed to the browser, so the
-// existing security model holds. One agent for now; AGENT_ID from env, exactly
-// as company.ts. Routes read the whole store server-side and hand plain JSON out.
+// existing security model holds. Routes read the whole store server-side and
+// hand plain JSON out.
+// ponytail: the board read routes below still take AGENT_ID from env — the
+// dashboard picking WHICH agent to view is a separate change (out of scope for
+// the identity fix, which is inbound/outbound routing).
 const AGENT_ID = process.env.AGENT_ID ?? "agent_demo";
 
 export const apiRouter = Router();
+
+// Agent registry admin. The receiving number selects the lane, so every agent
+// must have a row: read_number (what the bot reads inbound on) → agent_id +
+// send_number (where the bot sends help). Numbers are normalized to bare digits
+// in the store. GET lists them; POST registers one.
+apiRouter.get("/api/agents/registry", async (_req: Request, res: Response) => {
+  try {
+    res.json(await listAllAgents());
+  } catch (err) {
+    console.error("GET /api/agents/registry:", err);
+    res.sendStatus(500);
+  }
+});
+
+apiRouter.post("/api/agents", async (req: Request, res: Response) => {
+  try {
+    const { agent_id, read_number, send_number, name } = req.body ?? {};
+    const isDigits = (v: unknown) => typeof v === "string" && /\d{6,15}/.test(v.replace(/\D/g, ""));
+    if (typeof agent_id !== "string" || !agent_id.trim()) {
+      return res.status(400).json({ error: "agent_id required" });
+    }
+    if (!isDigits(read_number) || !isDigits(send_number)) {
+      return res.status(400).json({ error: "read_number and send_number must be phone numbers" });
+    }
+    const agent = await registerAgent({
+      agent_id: agent_id.trim(),
+      read_number,
+      send_number,
+      name: typeof name === "string" ? name : undefined,
+    });
+    res.status(201).json(agent);
+  } catch (err) {
+    // Unique-constraint clash (duplicate agent_id or read_number) → 409, not 500.
+    if ((err as { code?: string })?.code === "23505") {
+      return res.status(409).json({ error: "agent_id or read_number already registered" });
+    }
+    console.error("POST /api/agents:", err);
+    res.sendStatus(500);
+  }
+});
 
 // Dashboard cards: one row per connected agent + aggregate counts.
 apiRouter.get("/api/agents", async (_req: Request, res: Response) => {

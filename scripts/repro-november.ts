@@ -27,6 +27,7 @@ async function main() {
     console.log(`\n> Lead: "${text}"`);
     leadId = await handleAgentMessage({
       agentId: AGENT_ID,
+      sendNumber: process.env.AGENT_COMPANY_NUMBER ?? "", // sim: where cards would go
       leadNumber: PHONE,
       direction: "in",
       text,

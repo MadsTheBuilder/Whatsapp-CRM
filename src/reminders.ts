@@ -1,4 +1,11 @@
-import { listLeads, responsiveness, setPipeline, type Lead, type Pipeline } from "./store.js";
+import {
+  listAllAgents,
+  listLeads,
+  responsiveness,
+  setPipeline,
+  type Lead,
+  type Pipeline,
+} from "./store.js";
 import { notifyAgent } from "./notify.js";
 
 // Only auto-demote a silent lead to no_reply from these early/neutral stages.
@@ -9,8 +16,6 @@ const AUTO_NOREPLY_FROM: ReadonlySet<Pipeline> = new Set<Pipeline>([
   "qualifies",
   "details_sent",
 ]);
-
-const AGENT_ID = process.env.AGENT_ID ?? "agent_demo";
 
 // Tunables. A lead is "stale" once the agent's last message has gone unanswered
 // this long — longer than the store's 24h QUIET_MS, which only marks "no_reply".
@@ -57,28 +62,46 @@ export function buildDigest(stale: { lead: Lead; silentMs: number }[]): string |
   );
 }
 
-/**
- * Find the stale leads and DM the agent one digest naming them so they can chase.
- * Returns the digest sent, or null when nothing is stale (no message sent).
- * ponytail: single digest, not N messages; per-lead if the agent asks.
- */
-export async function runDailyReminders(): Promise<string | null> {
-  const leads = await listLeads(AGENT_ID);
+/** One agent's stale-lead digest: find stale leads, auto-demote silent ones, and
+ *  DM that agent (their send_number) one digest. Returns the digest or null. */
+async function runAgentReminders(agentId: string, sendNumber: string): Promise<string | null> {
+  const leads = await listLeads(agentId);
 
   const states: LeadState[] = [];
   for (const lead of leads) {
-    const r = await responsiveness(AGENT_ID, lead.id);
+    const r = await responsiveness(agentId, lead.id);
     states.push({ lead, last_direction: r.last_direction, silent_ms: r.silent_ms });
 
     // Auto-demote to no_reply once the lead has gone silent past the store's
     // 24h window, but only from an early/neutral stage — never overwrite an
     // agent-set eoi/deal_closed/waste, and skip leads already at no_reply.
     if (r.state === "no_reply" && AUTO_NOREPLY_FROM.has(lead.pipeline)) {
-      await setPipeline(AGENT_ID, lead.id, "no_reply");
+      await setPipeline(agentId, lead.id, "no_reply");
     }
   }
 
   const digest = buildDigest(selectStale(states));
-  if (digest) await notifyAgent(digest);
+  if (digest) await notifyAgent(sendNumber, digest);
   return digest;
+}
+
+/**
+ * Daily follow-up: run the stale-lead digest for EVERY registered agent, each sent
+ * to its own send_number. Each agent only ever hears about their own leads. Returns
+ * a per-agent map of the digest sent (null = nothing stale), for observability.
+ * One agent's failure doesn't sink the others.
+ * ponytail: single digest per agent, not N messages; per-lead if the agent asks.
+ */
+export async function runDailyReminders(): Promise<Map<string, string | null>> {
+  const agents = await listAllAgents();
+  const results = new Map<string, string | null>();
+  for (const agent of agents) {
+    try {
+      results.set(agent.agent_id, await runAgentReminders(agent.agent_id, agent.send_number));
+    } catch (e) {
+      console.error(`[reminders] ${agent.agent_id} failed:`, e);
+      results.set(agent.agent_id, null);
+    }
+  }
+  return results;
 }

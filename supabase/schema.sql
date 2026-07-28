@@ -3,9 +3,28 @@
 -- one-agent demo is already multi-tenant-shaped. Wipe & recreate: run this on a
 -- clean Supabase project (CLAUDE.md: the old junk project is being wiped).
 
+drop table if exists agent_persona_versions cascade;
+drop table if exists agent_persona cascade;
 drop table if exists memory cascade;
 drop table if exists messages cascade;
 drop table if exists leads cascade;
+drop table if exists agents cascade;
+
+-- Agent registry: the receiving number selects the lane. The whole multi-agent
+-- fix hinges on this — every inbound message resolves its agent from the number
+-- it arrived on (read_number), and every bot message routes back to that agent's
+-- send_number. read_number is the display_phone_number on a dialog360 webhook, or
+-- the dev's own E.164 on the baileys pipe; send_number is where suggestions,
+-- reminders and Q&A answers land. Often equal (bot reads and sends to one phone).
+-- Registry is the ONLY source of identity — no env fallback; an unregistered
+-- number is dropped. Numbers are E.164 digits, no '+' (matches Meta/360dialog).
+create table agents (
+  agent_id     text primary key,
+  read_number  text not null unique,
+  send_number  text not null,
+  name         text,
+  created_at   timestamptz not null default now()
+);
 
 create table leads (
   id            bigserial primary key,
@@ -75,6 +94,7 @@ create table agent_persona (
   agent_id   text primary key,
   voice_card text,                          -- markdown blob; null = generic fallback
   card_upto  bigint not null default 0,     -- watermark: id of last outbound msg folded into the card
+  interview_state jsonb,                     -- in-flight WhatsApp voice interview; null = none (migration 008)
   updated_at timestamptz not null default now()
 );
 

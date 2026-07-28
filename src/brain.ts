@@ -3,6 +3,7 @@ import {
   findLeadByLid,
   setLeadLid,
   createPendingLead,
+  deletePendingLead,
   saveMessage,
   getMessages,
   getFacts,
@@ -73,10 +74,16 @@ export async function handleAgentMessage(ev: AgentMessageEvent): Promise<number>
     );
     // Fire the prompt only for the message that actually created the row, so a
     // race (two messages arriving before either inserts) prompts the agent once.
+    // If the prompt send fails (e.g. the 24h window isn't open yet), roll back the
+    // pending row — otherwise the lead is stuck pending forever, the card never
+    // retries, and every future message drops at the monitor gate below.
     if (didCreate) {
-      askApproval(ev.leadNumber, ev.leadName).catch((e) =>
-        console.error("askApproval failed:", e),
-      );
+      try {
+        await askApproval(ev.sendNumber, ev.leadNumber, ev.leadName);
+      } catch (e) {
+        console.error("askApproval failed — rolling back pending lead:", e);
+        await deletePendingLead(ev.agentId, ev.leadNumber);
+      }
     }
     return created.id;
   }
@@ -184,7 +191,7 @@ export async function handleAgentMessage(ev: AgentMessageEvent): Promise<number>
     const qualLine = [merged.deal_type, merged.beds, merged.area, merged.budget]
       .filter(Boolean)
       .join(" · ");
-    askStage(ev.leadNumber, lead.name, qualLine).catch((e) =>
+    askStage(ev.sendNumber, ev.leadNumber, lead.name, qualLine).catch((e) =>
       console.error("askStage failed:", e),
     );
   }
@@ -197,7 +204,7 @@ export async function handleAgentMessage(ev: AgentMessageEvent): Promise<number>
     `Suggested replies:\n` +
     replies.filter(Boolean).map((r, i) => `${i + 1}. ${r}`).join("\n");
   // ponytail: fire-and-forget — a failed agent DM must not fail the inbound loop.
-  notifyAgent(card).catch((e) => console.error("notifyAgent failed:", e));
+  notifyAgent(ev.sendNumber, card).catch((e) => console.error("notifyAgent failed:", e));
 
   return lead.id;
 }

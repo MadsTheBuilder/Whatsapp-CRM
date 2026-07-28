@@ -8,7 +8,7 @@ import assert from "node:assert";
 process.env.SUPABASE_URL ??= "http://localhost:54321";
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "dummy";
 
-const { parseApprovalId } = await import("../src/company.js");
+const { parseApprovalId, isVoiceCommand } = await import("../src/company.js");
 
 // --- valid buttons round-trip to a decision + phone ---
 assert.deepStrictEqual(parseApprovalId("approve:971500000001"), {
@@ -32,5 +32,16 @@ assert.strictEqual(
   null,
   "jid suffix is not a bare phone",
 );
+
+// --- isVoiceCommand: tolerant of real-keyboard whitespace/case (the exact /^voice$/
+// match silently fell through to Q&A when the body wasn't bit-exact) ---
+assert.strictEqual(isVoiceCommand("voice"), true);
+assert.strictEqual(isVoiceCommand("Voice"), true, "case-insensitive");
+assert.strictEqual(isVoiceCommand("  voice  "), true, "trims surrounding whitespace");
+assert.strictEqual(isVoiceCommand("VOICE\n"), true, "trailing newline + caps");
+assert.strictEqual(isVoiceCommand("learn my voice"), true, "alias");
+assert.strictEqual(isVoiceCommand("voice interview"), true, "alias");
+assert.strictEqual(isVoiceCommand("how many leads?"), false, "a real question is not the trigger");
+assert.strictEqual(isVoiceCommand("voicemail"), false, "substring must not match");
 
 console.log("approval logic self-check passed");

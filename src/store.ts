@@ -147,6 +147,19 @@ export async function createPendingLead(
   return { lead: data as Lead, created: true };
 }
 
+/** Delete a still-pending lead by phone. Used to roll back a pending row whose
+ *  approval prompt failed to send, so the next message re-fires as a fresh
+ *  sighting. Guarded on monitor='pending' — never removes an approved/rejected
+ *  lead (its transcript/summary must survive). */
+export async function deletePendingLead(agentId: string, phone: string): Promise<void> {
+  await db
+    .from("leads")
+    .delete()
+    .eq("agent_id", agentId)
+    .eq("phone", phone)
+    .eq("monitor", "pending");
+}
+
 /** Set a lead's approval state (agent tapped Yes/No). Returns false if no such
  *  pending lead exists (already decided, or number never prompted). */
 export async function setMonitor(
@@ -180,6 +193,77 @@ export async function setPipeline(
     .select("id");
   if (error) throw error;
   return (data?.length ?? 0) > 0;
+}
+
+// Agent registry (supabase/schema.sql `agents`): maps each agent's read-number →
+// { agent_id, send_number }. The receiving number on an inbound event selects the
+// lane; this is the ONLY source of identity (no env fallback).
+export interface Agent {
+  agent_id: string;
+  read_number: string;
+  send_number: string;
+  name: string | null;
+}
+
+/** Digits only — strip a stray '+' / spaces so equality-matching a phone can't
+ *  silently miss. Numbers are stored and matched as bare E.164 digits. */
+function digitsOnly(n: string): string {
+  return String(n).replace(/\D/g, "");
+}
+
+/** The lane a message arrived on: resolve the agent by the number the bot READS
+ *  inbound on (display_phone_number for dialog360, the dev's own E.164 for
+ *  baileys). undefined = unregistered number → the caller drops the message. */
+export async function resolveAgentByReadNumber(readNumber: string): Promise<Agent | undefined> {
+  const { data } = await db
+    .from("agents")
+    .select("agent_id, read_number, send_number, name")
+    .eq("read_number", digitsOnly(readNumber))
+    .maybeSingle();
+  return (data as Agent) ?? undefined;
+}
+
+/** The asking agent on the company webhook: resolve by the number they text the
+ *  bot FROM (their send_number). undefined = not a registered agent → drop. */
+export async function resolveAgentBySendNumber(sendNumber: string): Promise<Agent | undefined> {
+  const { data } = await db
+    .from("agents")
+    .select("agent_id, read_number, send_number, name")
+    .eq("send_number", digitsOnly(sendNumber))
+    .maybeSingle();
+  return (data as Agent) ?? undefined;
+}
+
+/** Every registered agent, for per-agent iteration (the daily reminder digest). */
+export async function listAllAgents(): Promise<Agent[]> {
+  const { data, error } = await db
+    .from("agents")
+    .select("agent_id, read_number, send_number, name");
+  if (error) throw error;
+  return (data as Agent[]) ?? [];
+}
+
+/** Register an agent (POST /api/agents). Numbers are normalized to bare digits so
+ *  the read/send equality lookups above always match. Throws on a duplicate
+ *  agent_id or read_number (unique constraints). */
+export async function registerAgent(a: {
+  agent_id: string;
+  read_number: string;
+  send_number: string;
+  name?: string;
+}): Promise<Agent> {
+  const { data, error } = await db
+    .from("agents")
+    .insert({
+      agent_id: a.agent_id,
+      read_number: digitsOnly(a.read_number),
+      send_number: digitsOnly(a.send_number),
+      name: a.name ?? null,
+    })
+    .select("agent_id, read_number, send_number, name")
+    .single();
+  if (error) throw error;
+  return data as Agent;
 }
 
 export interface AgentSummary {
@@ -434,6 +518,39 @@ export async function unfoldedAgentSamples(
     return body && !suggested.has(normalizeForCopyCheck(r.body));
   });
   return { samples: samples.map((r) => ({ id: r.id, body: r.body })), capped };
+}
+
+// Layer 2C: in-flight state of an agent's WhatsApp voice interview. null = none.
+export type InterviewState = {
+  phase: "awaiting_consent" | "interviewing";
+  step: number; // 0-based scenario index
+  replies: string[]; // captured verbatim, extracted into the card at wrap
+};
+
+/** Read the agent's interview state (null if no interview in progress). The row
+ *  may not exist yet (agent never onboarded) — treated as null. */
+export async function getInterviewState(agentId: string): Promise<InterviewState | null> {
+  const { data } = await db
+    .from("agent_persona")
+    .select("interview_state")
+    .eq("agent_id", agentId)
+    .maybeSingle();
+  return (data?.interview_state as InterviewState | null) ?? null;
+}
+
+/** Write the agent's interview state (null clears it). Upserts so an agent with no
+ *  persona row yet can still start an interview — the card stays null until wrap. */
+export async function setInterviewState(
+  agentId: string,
+  state: InterviewState | null,
+): Promise<void> {
+  const { error } = await db
+    .from("agent_persona")
+    .upsert(
+      { agent_id: agentId, interview_state: state, updated_at: new Date().toISOString() },
+      { onConflict: "agent_id" },
+    );
+  if (error) throw error;
 }
 
 // Layer 2: the agent's persisted voice card (markdown blob) seeded by the

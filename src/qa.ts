@@ -2,8 +2,6 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { structured } from "./claude.js";
 import { listLeads, getFacts, responsiveness, type Lead } from "./store.js";
 
-const AGENT_ID = process.env.AGENT_ID ?? "agent_demo";
-
 // A lead counts as qualified once all three fields are known (same rule the brain
 // uses to decide qualification is complete — see brain.ts wasQualified).
 export function isQualified(l: Lead): boolean {
@@ -61,9 +59,9 @@ const HELP =
  * intent with the LLM, then answer straight from the store — no NLU framework.
  * ponytail: LLM intent + direct store queries; enum is small on purpose.
  */
-export async function answerAgentQuestion(text: string): Promise<string> {
+export async function answerAgentQuestion(agentId: string, text: string): Promise<string> {
   const { intent, lead: needle } = await structured<Intent>(SYSTEM, text, SCHEMA);
-  const leads = await listLeads(AGENT_ID);
+  const leads = await listLeads(agentId);
 
   switch (intent) {
     case "count_leads":
@@ -76,7 +74,7 @@ export async function answerAgentQuestion(text: string): Promise<string> {
 
     case "count_no_reply": {
       const states = await Promise.all(
-        leads.map((l) => responsiveness(AGENT_ID, l.id).then((r) => r.state)),
+        leads.map((l) => responsiveness(agentId, l.id).then((r) => r.state)),
       );
       const n = states.filter((s) => s === "no_reply").length;
       return `${n} lead${n === 1 ? "" : "s"} ${n === 1 ? "has" : "have"} gone quiet with no reply.`;
@@ -85,7 +83,7 @@ export async function answerAgentQuestion(text: string): Promise<string> {
     case "summarize_lead": {
       const found = needle ? findLead(leads, needle) : undefined;
       if (!found) return `I couldn't find a lead matching "${needle ?? ""}".`;
-      const facts = await getFacts(AGENT_ID, found.id);
+      const facts = await getFacts(agentId, found.id);
       const who = found.name ? `${found.name} (${found.phone})` : found.phone;
       const summary = found.summary?.trim() || "No summary yet.";
       const factLines = facts.length ? "\n\nFacts:\n" + facts.map((f) => `• ${f}`).join("\n") : "";

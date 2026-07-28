@@ -7,7 +7,6 @@ import assert from "node:assert";
 
 process.env.SUPABASE_URL ??= "http://localhost:54321";
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "dummy";
-process.env.AGENT_ID = "agent_test";
 process.env.COMPANY_BOT_NUMBER = "971581137568"; // bot's own number — must be dropped
 
 const { toEvent, jidToNumber, messageText } = await import("../src/pipe/baileys.js");
@@ -36,8 +35,11 @@ const inbound = toEvent(
     pushName: "Ahmed",
   }),
 );
+// toEvent is a pure transform — identity (agentId/sendNumber) is blank here and
+// stamped by the pipe from the resolved dev agent, so both are "".
 assert.deepStrictEqual(inbound, {
-  agentId: "agent_test",
+  agentId: "",
+  sendNumber: "",
   leadNumber: "971500000001",
   direction: "in",
   text: "Looking for a 2BR in JVC",

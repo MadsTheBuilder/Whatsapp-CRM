@@ -9,6 +9,7 @@ import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import { handleAgentMessage } from "../brain.js";
+import { resolveAgentByReadNumber, type Agent } from "../store.js";
 import type { AgentMessageEvent } from "./types.js";
 
 // This pipe READS the agent's own WhatsApp number (unofficial Baileys link) and
@@ -16,7 +17,6 @@ import type { AgentMessageEvent } from "./types.js";
 // never learns it came from Baileys — a 360dialog webhook can replace this file
 // later with zero brain changes.
 
-const AGENT_ID = process.env.AGENT_ID ?? "agent_demo";
 const AUTH_DIR = process.env.BAILEYS_AUTH_DIR ?? "./baileys_auth";
 
 // The bot's OWN WhatsApp number. Its suggestion cards land on the agent's phone,
@@ -103,7 +103,8 @@ export function toEvent(msg: WAMessage): AgentMessageEvent | null {
   if (!text) return null; // non-text (media/reaction/etc.) — text-only first cut
 
   return {
-    agentId: AGENT_ID,
+    agentId: "", // stamped in messages.upsert from the resolved dev agent
+    sendNumber: "", // stamped in messages.upsert from the resolved dev agent
     leadNumber, // counterpart's phone (from senderPn on @lid), the lead in both directions
     direction: msg.key.fromMe ? "out" : "in", // fromMe = the agent typed it
     text,
@@ -119,6 +120,11 @@ export function toEvent(msg: WAMessage): AgentMessageEvent | null {
  * once, auto-reconnect on drops, and feed each live text message into the brain.
  */
 export async function startBaileys(): Promise<WASocket> {
+  // The dev agent for this socket's number, resolved once on "open" from the
+  // registry. null until resolved (or if the number isn't registered) — inbound
+  // is dropped while null so nothing is ever stamped with a guessed identity.
+  let agent: Agent | null = null;
+
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
@@ -146,6 +152,27 @@ export async function startBaileys(): Promise<WASocket> {
     if (connection === "open") {
       console.log("[baileys] connected");
       reconnectDelay = RECONNECT_MIN_MS; // a good connection resets the backoff
+      // Registry is the only source of identity — resolve the dev agent from THIS
+      // socket's own number (the number the QR was scanned with). No row → refuse
+      // to process (agent stays null); the dev inserts one row into `agents`.
+      const ownNumber = sock.user?.id ? jidToNumber(sock.user.id) : undefined;
+      if (!ownNumber) {
+        console.error("[baileys] connected but no own number on sock.user — cannot resolve agent");
+      } else {
+        resolveAgentByReadNumber(ownNumber)
+          .then((a) => {
+            if (a) {
+              agent = a;
+              console.log(`[baileys] agent lane: ${a.agent_id} (read ${ownNumber} → send ${a.send_number})`);
+            } else {
+              agent = null;
+              console.error(
+                `[baileys] number ${ownNumber} is not registered — messages will be dropped. Insert a row into agents (read_number=${ownNumber}).`,
+              );
+            }
+          })
+          .catch((e) => console.error("[baileys] agent resolve failed:", e));
+      }
     }
     if (connection === "close") {
       const code = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
@@ -176,9 +203,18 @@ export async function startBaileys(): Promise<WASocket> {
     // the old backlog — ignore them so restarts don't re-process past chats.
     if (type !== "notify") return;
 
+    // Registry is the only source of identity — until the dev's number resolves to
+    // a registered agent, drop everything (never stamp a guessed agent).
+    if (!agent) {
+      console.warn("[baileys] dropping message(s): no resolved agent (number not registered yet)");
+      return;
+    }
+
     for (const msg of messages) {
       const ev = toEvent(msg);
       if (!ev) continue;
+      ev.agentId = agent.agent_id; // stamp the dev agent's lane
+      ev.sendNumber = agent.send_number;
       // Belt-and-suspenders on top of the notify filter: a live re-delivery after
       // a long outage still carries its original timestamp — skip if too old.
       if (Date.now() - ev.timestamp > STALE_MS) {

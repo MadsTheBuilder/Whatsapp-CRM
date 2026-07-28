@@ -30,6 +30,7 @@ async function main() {
   console.log(`Injecting inbound from ${phone}: "${text}"`);
   const leadId = await handleAgentMessage({
     agentId: AGENT_ID,
+    sendNumber: process.env.AGENT_COMPANY_NUMBER ?? "", // sim: where cards would go
     leadNumber: phone,
     direction: "in",
     text,
