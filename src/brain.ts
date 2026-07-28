@@ -25,6 +25,17 @@ import type { AgentMessageEvent } from "./pipe/types.js";
 // Below this many messages the raw transcript is enough — no point compressing.
 const SUMMARIZE_AFTER = 6;
 
+// Build a wa.me link that opens the lead's chat with `reply` pre-filled. wa.me wants
+// bare digits (no leading +) and a URL-encoded body. Returns null when we can't make
+// a dialable link — a @lid chat (leadNumber is an opaque id, not a phone) or empty
+// digits — so the caller falls back to plain suggestion text.
+export function waMeLink(leadNumber: string, isLid: boolean, reply: string): string | null {
+  if (isLid) return null;
+  const digits = leadNumber.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(reply)}`;
+}
+
 // Once a summary exists, qualify/reply only need the recent turns — the summary
 // carries the older context. Sending the whole transcript every turn is quadratic
 // token cost on long threads.
@@ -196,13 +207,24 @@ export async function handleAgentMessage(ev: AgentMessageEvent): Promise<number>
     );
   }
 
-  // Privately DM the agent the lead's message + the 4 options so they can copy one
-  // and send it themselves. Goes to the agent on the company number — never the lead.
+  // Privately DM the agent the lead's message + the 4 options. Each suggestion is a
+  // tappable wa.me link that opens the lead's chat with the reply pre-filled — the
+  // agent reviews and sends it themselves. Goes to the agent on the company number —
+  // never the lead. On @lid chats leadNumber isn't a dialable phone, so the link is
+  // skipped there and the plain suggestion text is shown instead (see waMeLink).
   const who = lead.name ? `${lead.name} (${ev.leadNumber})` : ev.leadNumber;
-  const card =
-    `New message from ${who}:\n"${ev.text}"\n\n` +
-    `Suggested replies:\n` +
-    replies.filter(Boolean).map((r, i) => `${i + 1}. ${r}`).join("\n");
+  const isLid = Boolean(ev.lid);
+  const lines = replies.filter(Boolean).map((r, i) => {
+    const link = waMeLink(ev.leadNumber, isLid, r);
+    // Tight single-spaced layout: the full reply, then its tap-to-open link on the
+    // next line. No blank-line gaps — keeps all 4 readable despite WhatsApp rendering
+    // a link-preview for the first URL. On @lid chats there's no link, just the text.
+    return link ? `${i + 1}. ${r}\n→ ${link}` : `${i + 1}. ${r}`;
+  });
+  const header = isLid
+    ? `Suggested replies:`
+    : `Suggested replies (tap ↓ to open the chat pre-filled):`;
+  const card = `New message from ${who}:\n"${ev.text}"\n\n${header}\n` + lines.join("\n");
   // ponytail: fire-and-forget — a failed agent DM must not fail the inbound loop.
   notifyAgent(ev.sendNumber, card).catch((e) => console.error("notifyAgent failed:", e));
 
