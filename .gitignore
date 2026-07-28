@@ -17,6 +17,12 @@ June lead csv/
 # codebase-memory / understand tool scratch data — not source.
 .ua/
 
+# Internal planning + dev handoff logs — kept local, not in the shared repo.
+# Exception: the deployment plan is needed ON the mini-PC (it's followed there).
+wa_plan/*
+!wa_plan/selfhost-deploy-DEPLOYMENT-PLAN.md
+wa_session_log/
+
 # Local runtime logs — not source.
 *.log
 
