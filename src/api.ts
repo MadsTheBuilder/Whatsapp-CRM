@@ -37,7 +37,7 @@ apiRouter.get("/api/agents/registry", async (_req: Request, res: Response) => {
 
 apiRouter.post("/api/agents", async (req: Request, res: Response) => {
   try {
-    const { agent_id, read_number, send_number, name } = req.body ?? {};
+    const { agent_id, read_number, send_number, name, goyzer_number } = req.body ?? {};
     const isDigits = (v: unknown) => typeof v === "string" && /\d{6,15}/.test(v.replace(/\D/g, ""));
     if (typeof agent_id !== "string" || !agent_id.trim()) {
       return res.status(400).json({ error: "agent_id required" });
@@ -45,11 +45,15 @@ apiRouter.post("/api/agents", async (req: Request, res: Response) => {
     if (!isDigits(read_number) || !isDigits(send_number)) {
       return res.status(400).json({ error: "read_number and send_number must be phone numbers" });
     }
+    if (goyzer_number !== undefined && goyzer_number !== null && !isDigits(goyzer_number)) {
+      return res.status(400).json({ error: "goyzer_number must be a phone number" });
+    }
     const agent = await registerAgent({
       agent_id: agent_id.trim(),
       read_number,
       send_number,
       name: typeof name === "string" ? name : undefined,
+      goyzer_number: isDigits(goyzer_number) ? goyzer_number : undefined,
     });
     res.status(201).json(agent);
   } catch (err) {

@@ -50,17 +50,18 @@ export async function notifyAgent(to: string, body: string): Promise<void> {
  * is the ONLY sanctioned path that messages a NON-agent number — the opt-out-aware,
  * paced campaign blast (scripts/blast.ts) uses it to re-open old funnel leads. A
  * template is the only legal way to message outside the 24h window; free-form text
- * to a cold contact would be rejected. Same channel/auth as companySend — so the
- * same function serves any future 360dialog number, just a different API key.
+ * to a cold contact would be rejected. `apiKey` selects the sending 360dialog
+ * account (defaults to the company bot); the portal relay passes the agent's own
+ * key so the first relayed message goes out from the agent's number per CLAUDE.md.
  */
 export async function sendTemplate(
   to: string,
   templateName: string,
   languageCode: string,
   params: string[],
+  apiKey: string = process.env.DIALOG360_API_KEY ?? "",
+  baseUrl: string = process.env.DIALOG360_API_URL ?? "",
 ): Promise<void> {
-  const apiKey = process.env.DIALOG360_API_KEY;
-  const baseUrl = process.env.DIALOG360_API_URL;
   if (!apiKey || !baseUrl) throw new Error("DIALOG360_API_KEY and DIALOG360_API_URL must be set");
   if (!to) throw new Error("sendTemplate: destination required");
 

@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PropertyFinder Enterprise API — Full Capability Reference</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1d1d1f;
+    --muted: #6e6e73;
+    --border: #e5e5e7;
+    --code-bg: #f5f5f7;
+    --accent: #0066cc;
+    --callout-bg: #f0f7ff;
+    --callout-border: #0066cc;
+    --warn-bg: #fff6ea;
+    --warn-border: #cc8b00;
+    --pill-bg: #eef2f7;
+    --pill-fg: #445;
+    --nav-bg: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #18181a;
+      --fg: #f0f0f0;
+      --muted: #a0a0a5;
+      --border: #33343a;
+      --code-bg: #262629;
+      --accent: #5fb0ff;
+      --callout-bg: #142230;
+      --callout-border: #5fb0ff;
+      --warn-bg: #2a2210;
+      --warn-border: #d9a441;
+      --pill-bg: #2a2b30;
+      --pill-fg: #cdd3dd;
+      --nav-bg: #202023;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #18181a; --fg: #f0f0f0; --muted: #a0a0a5; --border: #33343a;
+    --code-bg: #262629; --accent: #5fb0ff; --callout-bg: #142230; --callout-border: #5fb0ff;
+    --warn-bg: #2a2210; --warn-border: #d9a441; --pill-bg: #2a2b30; --pill-fg: #cdd3dd; --nav-bg: #202023;
+  }
+  :root[data-theme="light"] {
+    --bg: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --border: #e5e5e7;
+    --code-bg: #f5f5f7; --accent: #0066cc; --callout-bg: #f0f7ff; --callout-border: #0066cc;
+    --warn-bg: #fff6ea; --warn-border: #cc8b00; --pill-bg: #eef2f7; --pill-fg: #445; --nav-bg: #fafafa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  .layout {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 24px 100px;
+  }
+  header h1 {
+    font-size: 1.7rem;
+    margin-bottom: 4px;
+  }
+  header .source {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 24px;
+    word-break: break-all;
+  }
+  header .source a { color: var(--accent); }
+  header p.lede {
+    color: var(--muted);
+    font-size: 0.95rem;
+    max-width: 640px;
+  }
+
+  nav.toc {
+    background: var(--nav-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 20px;
+    margin: 24px 0 40px;
+    font-size: 0.88rem;
+  }
+  nav.toc strong { display: block; margin-bottom: 8px; color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  nav.toc ul { columns: 2; list-style: none; padding: 0; margin: 0; }
+  nav.toc li { break-inside: avoid; margin-bottom: 4px; }
+  nav.toc a { color: var(--fg); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); text-decoration: underline; }
+
+  section.tab {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px 8px;
+    margin-bottom: 28px;
+    scroll-margin-top: 20px;
+  }
+  section.tab > .tab-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  section.tab h2 {
+    font-size: 1.25rem;
+    margin: 0;
+  }
+  .scope-pill {
+    display: inline-block;
+    background: var(--pill-bg);
+    color: var(--pill-fg);
+    font-size: 0.72rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 2px 8px;
+    border-radius: 100px;
+  }
+  section.tab > .what-it-lets-us-do {
+    font-size: 0.95rem;
+    color: var(--fg);
+    margin-bottom: 18px;
+  }
+  section.tab > .what-it-lets-us-do strong { color: var(--accent); }
+
+  h3 {
+    font-size: 0.95rem;
+    margin: 20px 0 8px;
+    color: var(--fg);
+  }
+  h3 .verb {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-right: 6px;
+  }
+  p { margin: 8px 0; }
+  ul, ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 5px 0; }
+  code {
+    background: var(--code-bg);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-size: 0.88em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 12px 14px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    margin: 10px 0;
+  }
+  strong { font-weight: 600; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 18px;
+    font-size: 0.85rem;
+  }
+  table th, table td {
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
+
+  .callout {
+    background: var(--callout-bg);
+    border-left: 3px solid var(--callout-border);
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 16px 0;
+  }
+  .warn {
+    background: var(--warn-bg);
+    border-left: 3px solid var(--warn-border);
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 16px 0;
+  }
+  .callout p:first-child, .warn p:first-child { margin-top: 0; }
+  .callout p:last-child, .warn p:last-child { margin-bottom: 0; }
+
+  section.highlight {
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin: 40px 0;
+  }
+  section.highlight h2 { color: var(--accent); }
+  section.highlight ol li { margin: 12px 0; }
+
+  footer {
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-align: center;
+    margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<header>
+  <h1>PropertyFinder Enterprise API — Full Capability Reference</h1>
+  <div class="source">Source: <a href="https://api-docs.propertyfinder.net/enterprise-api/index.html">api-docs.propertyfinder.net/enterprise-api</a></div>
+  <p class="lede">Every tab in the docs, what it actually lets you do, and the exact endpoints/fields behind it. The last section connects this to our WhatsApp lead-outreach automation specifically.</p>
+</header>
+
+<nav class="toc">
+  <strong>Jump to a tab</strong>
+  <ul>
+    <li><a href="#auth">Authentication &amp; Authorization</a></li>
+    <li><a href="#leads">Leads</a></li>
+    <li><a href="#webhooks">Webhooks</a></li>
+    <li><a href="#listings">Listings</a></li>
+    <li><a href="#users">Users, Roles &amp; Public Profiles</a></li>
+    <li><a href="#credits">Credits</a></li>
+    <li><a href="#compliances">Compliances</a></li>
+    <li><a href="#locations">Locations &amp; Projects</a></li>
+    <li><a href="#floorplans">Floor Plans</a></li>
+    <li><a href="#stats">Statistics</a></li>
+    <li><a href="#errors">Rate Limits &amp; Errors</a></li>
+    <li><a href="#outreach">What this means for outreach automation</a></li>
+  </ul>
+</nav>
+
+<!-- AUTH -->
+<section class="tab" id="auth">
+  <div class="tab-head"><h2>Authentication &amp; Authorization</h2></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> get a token and control exactly which of the other tabs our integration is allowed to touch.</p>
+
+  <h3><span class="verb">POST</span>/v1/auth/token — get an access token</h3>
+  <p>Credentials (API Key + API Secret) come from PF Expert → <em>Developer Resources → API Credentials</em> → generate type <code>API Integration</code>. Keys last up to <strong>365 days</strong>; once a new key is generated the old one stops working.</p>
+  <pre>POST https://atlas.propertyfinder.com/v1/auth/token
+{ "apiKey": "...", "apiSecret": "..." }
+
+200 →
+{ "accessToken": "...", "expiresIn": 1800, "tokenType": "Bearer" }</pre>
+  <div class="warn"><p><strong>No refresh token flow.</strong> Tokens expire in 30 minutes flat — the client must call this endpoint again on expiry, every time. Budget for this in any long-running worker.</p></div>
+
+  <h3>Scopes — what a token can actually see</h3>
+  <table>
+    <tr><th>Always on (default)</th><th>Opt-in (request when generating the key)</th></tr>
+    <tr>
+      <td>
+        <code>compliances:read</code><br>
+        <code>listing_verification:full_access</code><br>
+        <code>locations:read</code><br>
+        <code>projects:read</code><br>
+        <code>webhooks:full_access</code>
+      </td>
+      <td>
+        <code>users:read</code> / <code>users:full_access</code><br>
+        <code>listings:read</code> / <code>listings:full_access</code><br>
+        <code>leads:read</code><br>
+        <code>credits:read</code><br>
+        <code>statistics:read</code><br>
+        <code>roles:read</code>
+      </td>
+    </tr>
+  </table>
+  <p>Having a valid token is not enough — the endpoint also checks the token's scope. Missing scope → <code>403 Forbidden</code>, not a silent empty response. For our use case, we need at minimum <code>leads:read</code> and <code>webhooks:full_access</code>.</p>
+</section>
+
+<!-- LEADS -->
+<section class="tab" id="leads">
+  <div class="tab-head"><h2>Leads</h2> <span class="scope-pill">leads:read</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> pull every enquiry submitted against our listings, including the enquirer's phone/WhatsApp/email — read-only.</p>
+
+  <h3><span class="verb">GET</span>/v1/leads — list &amp; filter enquiries</h3>
+  <table>
+    <tr><th>Param</th><th>Notes</th></tr>
+    <tr><td><code>page</code></td><td>default 1</td></tr>
+    <tr><td><code>perPage</code></td><td>1–50, default 50</td></tr>
+    <tr><td><code>projectId</code></td><td>filter to one project</td></tr>
+    <tr><td><code>senderWhatsappUsername</code></td><td>find every lead from one WhatsApp contact</td></tr>
+    <tr><td><code>listingSearch</code></td><td>filter by listing</td></tr>
+  </table>
+
+  <h3>Lead object — every field</h3>
+  <table>
+    <tr><th>Field</th><th>Description</th></tr>
+    <tr><td><code>id</code></td><td>Lead identifier</td></tr>
+    <tr><td><code>listing.id</code>, <code>listing.reference</code></td><td>Which listing triggered the enquiry</td></tr>
+    <tr><td><code>message</code></td><td>The actual enquiry text the lead typed</td></tr>
+    <tr><td><code>sender.contacts[]</code></td><td>Array of <code>{ type, value }</code> — <code>type</code> is <code>phone</code>, <code>email</code>, or <code>whatsappUsername</code></td></tr>
+    <tr><td><code>responseLink</code></td><td>Deep link into PropertyFinder's own inbox UI (not an API action)</td></tr>
+    <tr><td><code>createdAt</code>, <code>updatedAt</code></td><td>Timestamps</td></tr>
+  </table>
+
+  <div class="warn"><p><strong>Read-only.</strong> There is no endpoint to reply to, close, or send anything to a lead through PropertyFinder. <code>responseLink</code> just opens their web inbox for a human to use.</p></div>
+</section>
+
+<!-- WEBHOOKS -->
+<section class="tab" id="webhooks">
+  <div class="tab-head"><h2>Webhooks</h2> <span class="scope-pill">webhooks:full_access</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> get pushed a notification the instant something happens, instead of polling — this is what makes real-time lead capture possible.</p>
+
+  <h3>Subscription management</h3>
+  <ul>
+    <li><span class="verb">POST</span><code>/v1/webhooks</code> — subscribe to an event type (<code>eventId</code> + delivery config)</li>
+    <li><span class="verb">GET</span><code>/v1/webhooks</code> — list active subscriptions</li>
+    <li><span class="verb">DELETE</span><code>/v1/webhooks/{eventId}</code> — unsubscribe</li>
+  </ul>
+
+  <h3>Every event type available</h3>
+  <table>
+    <tr><th>Category</th><th>Events</th><th>Needs scope</th></tr>
+    <tr><td>Leads</td><td><code>lead.created</code>, <code>lead.updated</code>, <code>lead.assigned</code></td><td><code>leads:read</code></td></tr>
+    <tr><td>Listings</td><td><code>listing.published</code>, <code>listing.unpublished</code>, <code>listing.action</code>, <code>listing.publishFailed</code></td><td><code>listings:read</code></td></tr>
+    <tr><td>Users</td><td><code>user.created</code>, <code>user.updated</code>, <code>user.deleted</code>, <code>user.activated</code>, <code>user.deactivated</code></td><td><code>users:read</code></td></tr>
+    <tr><td>Public profile</td><td><code>publicProfile.verification.approved</code>, <code>publicProfile.verification.rejected</code></td><td><code>users:read</code></td></tr>
+  </table>
+  <p>The <code>lead.*</code> events deliver the same lead object shape documented in the Leads tab above. Signature verification and retry policy for failed deliveries aren't spelled out in the docs — treat delivery as best-effort and make your handler idempotent (dedupe by <code>lead.id</code>).</p>
+  <p><strong>Also useful:</strong> subscribing to <code>listing.published</code>/<code>listing.publishFailed</code> is the documented way to confirm a publish actually succeeded, since <code>POST /v1/listings/{id}/publish</code> returns 200 immediately without waiting for the real result.</p>
+</section>
+
+<!-- LISTINGS -->
+<section class="tab" id="listings">
+  <div class="tab-head"><h2>Listings</h2> <span class="scope-pill">listings:read / listings:full_access</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> create, edit, publish, unpublish, price-check and upgrade property listings programmatically — full listing lifecycle management.</p>
+
+  <h3>Endpoints</h3>
+  <table>
+    <tr><th>Call</th><th>Does</th></tr>
+    <tr><td><span class="verb">POST</span><code>/v1/listings</code></td><td>Create a new listing in draft mode</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/listings</code></td><td>Search/list listings, paginated, filterable by permit number, search term, status</td></tr>
+    <tr><td><span class="verb">PUT</span><code>/v1/listings/{id}</code></td><td>Update a draft or published listing (partial body); 409 if the state disallows edits</td></tr>
+    <tr><td><span class="verb">DELETE</span><code>/v1/listings/{id}</code></td><td>Delete a listing entirely</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/listings/{id}/publish/prices</code></td><td>Check the credit cost of publishing before you commit</td></tr>
+    <tr><td><span class="verb">POST</span><code>/v1/listings/{id}/publish</code></td><td>Kick off publishing (async — 200 ≠ live, confirm via webhook or re-fetch)</td></tr>
+    <tr><td><span class="verb">POST</span><code>/v1/listings/{id}/unpublish</code></td><td>Take a live listing down</td></tr>
+    <tr><td><span class="verb">GET</span> / <span class="verb">POST</span><code>/v1/listings/{id}/upgrades</code></td><td>List or apply paid boosts/features to a listing</td></tr>
+  </table>
+
+  <h3>What a listing record actually contains</h3>
+  <ul>
+    <li><strong>Identity/status:</strong> <code>id</code>, <code>reference</code>, <code>status</code>, timestamps</li>
+    <li><strong>Property facts:</strong> <code>category</code> (residential/commercial), <code>type</code> (apartment, villa, office-space, land…), <code>size</code>, <code>builtUpArea</code>, <code>bedrooms</code>/<code>bathrooms</code>, <code>furnishingType</code>, <code>finishingType</code></li>
+    <li><strong>Pricing:</strong> <code>price.type</code> (sale/yearly/monthly/weekly/daily), <code>price.amounts</code>, <code>downPayment</code> (sales)</li>
+    <li><strong>Location &amp; legal:</strong> <code>location.id</code>/coordinates, <code>uaeEmirate</code>, <code>compliance</code> (permit + license number — mandatory for UAE/KSA)</li>
+    <li><strong>Media:</strong> <code>media.images[]</code> — needs a hosted, HTTPS, ≥7-day-valid URL PropertyFinder can fetch from its own egress IPs</li>
+    <li><strong>Copy:</strong> localized <code>title</code>/<code>description</code> (en/ar) — no emojis or HTML in description yet</li>
+    <li><strong>Amenities/enhancements:</strong> allowed values depend on property type + category + country combination</li>
+  </ul>
+
+  <h3>Region-specific compliance built into this tab</h3>
+  <ul>
+    <li><strong>Dubai:</strong> DLD permit validation mandatory (except DIFC/JAFZA); listing <code>type</code>/<code>projectStatus</code> must map to the permit's official classification.</li>
+    <li><strong>Abu Dhabi:</strong> ADREC compliance mandatory; sale vs. rent permit type must match listing category; manual verification with documents required after creation.</li>
+    <li><strong>Saudi Arabia:</strong> REGA data is authoritative — PropertyFinder silently overrides your submitted <code>category</code>, <code>type</code>, <code>size</code>, <code>location</code>, and <code>price</code> fields with REGA's own record.</li>
+  </ul>
+  <div class="callout"><p>Not relevant to lead outreach directly, but this is the tab we'd use if we ever wanted to auto-publish or auto-price listings — currently out of scope for this project.</p></div>
+</section>
+
+<!-- USERS -->
+<section class="tab" id="users">
+  <div class="tab-head"><h2>Users, Roles &amp; Public Profiles</h2> <span class="scope-pill">users:read / users:full_access / roles:read</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> manage agent accounts, their public-facing profile (the one leads see on a listing), and their role/permission level on the PropertyFinder side.</p>
+
+  <h3>Users</h3>
+  <table>
+    <tr><th>Call</th><th>Does</th></tr>
+    <tr><td><span class="verb">POST</span><code>/v1/users</code></td><td>Create a user + their public profile. Requires email, first/last name, mobile, roleId.</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/users</code></td><td>Search users by status/role/profile/email, paginated</td></tr>
+    <tr><td><span class="verb">PATCH</span><code>/v1/users/{id}</code></td><td>Update name, email, mobile, role, active status (password update is deprecated/no-op)</td></tr>
+  </table>
+
+  <h3>Public Profiles</h3>
+  <table>
+    <tr><th>Call</th><th>Does</th></tr>
+    <tr><td><span class="verb">PATCH</span><code>/v1/public-profiles/{id}</code></td><td>Update the public-facing card: name, phone, <strong>whatsappPhone</strong>, bio, position, photo, LinkedIn, nationality, languages, compliance credentials</td></tr>
+    <tr><td><span class="verb">POST</span><code>/v1/public-profiles/{id}/submit-verification</code></td><td>Submit phone + license document for PropertyFinder to verify the agent</td></tr>
+  </table>
+  <p><em>Note:</em> the public profile's own <code>whatsappPhone</code> field is what a lead sees/uses to reach the agent from the listing page in the first place — worth keeping in sync with whichever number is actually wired into our Baileys/360dialog pipe.</p>
+
+  <h3>Roles</h3>
+  <p><span class="verb">GET</span><code>/v1/roles</code> — lists base + custom roles (<code>id</code>, <code>name</code>, <code>roleKey</code>, <code>baseRoleKey</code>, <code>isCustom</code>). Example: Admin, Agent, Decision Maker.</p>
+</section>
+
+<!-- CREDITS -->
+<section class="tab" id="credits">
+  <div class="tab-head"><h2>Credits</h2> <span class="scope-pill">credits:read</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> check how much publishing budget is left and audit what it's been spent on. Read-only, no way to top up via API.</p>
+  <table>
+    <tr><th>Call</th><th>Does</th></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/credits/balance</code></td><td>Current available credit balance</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/credits/transactions</code></td><td>Transaction history — filter by date (max 90-day window) and type</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/credits/spent</code></td><td>Credits spent, filterable per listing</td></tr>
+  </table>
+  <p>Publishing a listing and applying upgrades are what consume credits.</p>
+</section>
+
+<!-- COMPLIANCES -->
+<section class="tab" id="compliances">
+  <div class="tab-head"><h2>Compliances</h2> <span class="scope-pill">compliances:read (default on)</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> look up a permit/license number against the government registry (DLD/ADREC/REGA) and get back the official, authoritative property record.</p>
+  <p><span class="verb">GET</span><code>/v1/compliances/{permitNumber}/{licenseNumber}</code> (also takes <code>permitType</code>) returns <code>property.listingType</code> (Unit/Villa/Building/Land), <code>property.saleType</code> (Primary/Secondary), and <code>builtUpArea</code> — these map directly onto listing fields like <code>category</code>, <code>type</code>, <code>projectStatus</code>.</p>
+  <p>Listing verification is automatically triggered after a listing is published, using this same data source.</p>
+</section>
+
+<!-- LOCATIONS / PROJECTS -->
+<section class="tab" id="locations">
+  <div class="tab-head"><h2>Locations &amp; Projects</h2> <span class="scope-pill">locations:read / projects:read (default on)</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> resolve a free-text area name into PropertyFinder's canonical location tree, and fetch a developer project's details.</p>
+  <table>
+    <tr><th>Call</th><th>Does</th></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/locations</code></td><td>Search locations by text (e.g. "Marina") or by parent — returns <code>id</code>, name, lat/lng</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/projects/{id}</code></td><td>Fetch a developer project's details (used for project-level permits/bulk listings)</td></tr>
+  </table>
+  <p>PropertyFinder explicitly recommends a human confirm the matched location rather than auto-selecting the top search result, to avoid mis-assigning a listing to the wrong area.</p>
+</section>
+
+<!-- FLOOR PLANS -->
+<section class="tab" id="floorplans">
+  <div class="tab-head"><h2>Floor Plans</h2> <span class="scope-pill">listings:read</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> pull floor plan images/dimensions to attach to a listing.</p>
+  <table>
+    <tr><th>Call</th><th>Does</th></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/floor-plans</code></td><td>Paginated list of available floor plans</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/floor-plans/{id}</code></td><td>One floor plan's images/dimensions</td></tr>
+  </table>
+</section>
+
+<!-- STATS -->
+<section class="tab" id="stats">
+  <div class="tab-head"><h2>Statistics</h2> <span class="scope-pill">statistics:read</span></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> pull agent/profile performance numbers — how visible and competitive an agent's profile is on the platform.</p>
+  <table>
+    <tr><th>Call</th><th>Does</th></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/stats/public-profiles</code></td><td>Performance stats for a profile (views, activity)</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/stats/public-profiles-arena-ranking</code></td><td>Where a profile ranks against competitors</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/stats/superagent-stats</code></td><td>"SuperAgent" tier performance metrics</td></tr>
+    <tr><td><span class="verb">GET</span><code>/v1/stats/top-public-profiles</code></td><td>Leaderboard of top-performing profiles</td></tr>
+  </table>
+  <div class="callout"><p>Could feed a future "how am I doing on PropertyFinder this week" answer alongside the existing on-demand question feature — not built now, just a noted possibility.</p></div>
+</section>
+
+<!-- ERRORS -->
+<section class="tab" id="errors">
+  <div class="tab-head"><h2>Rate Limits &amp; Error Format</h2></div>
+  <p class="what-it-lets-us-do"><strong>Lets us:</strong> know how hard we can hit the API and how to parse a failure programmatically.</p>
+  <ul>
+    <li><code>POST /v1/auth/token</code>: 60 requests/minute</li>
+    <li>Every other endpoint: 650 requests/minute (per IP + per client)</li>
+  </ul>
+  <p>Errors follow an RFC-9457-style shape: <code>type</code>, <code>code</code>, <code>title</code>, <code>status</code>, <code>detail</code>, <code>trace_id</code>, plus a per-field <code>errors[]</code> array with JSON Pointers for validation failures.</p>
+  <table>
+    <tr><th>Status</th><th>Meaning</th></tr>
+    <tr><td>400</td><td>Malformed request/schema</td></tr>
+    <tr><td>401</td><td>Missing/invalid token</td></tr>
+    <tr><td>403</td><td>Valid token, missing scope</td></tr>
+    <tr><td>409</td><td>Listing state conflict (e.g. editing something not editable)</td></tr>
+    <tr><td>422</td><td>Business-rule validation failure</td></tr>
+    <tr><td>429</td><td>Rate limit hit</td></tr>
+  </table>
+</section>
+
+<!-- OUTREACH -->
+<section class="highlight" id="outreach">
+  <h2>What this means for our WhatsApp lead-outreach automation</h2>
+  <ol>
+    <li><strong>Capture is real-time and fully automatable.</strong> Subscribe to <code>lead.created</code> (Webhooks tab) → the instant someone enquires on a listing (Listings tab), we get their name, phone/WhatsApp-username/email, which listing, and their exact message — no polling required.</li>
+    <li><strong>The WhatsApp handoff is the whole play.</strong> <code>sender.contacts[].type === "whatsappUsername"</code> (or <code>phone</code>) from the Leads tab is exactly what's needed to open a WhatsApp conversation. This slots straight into this project's existing pipe seam: <code>{ agentId, leadNumber, direction, text, timestamp }</code>. A new PropertyFinder lead becomes a synthetic "first inbound message" event feeding the same brain that already handles Baileys/360dialog messages.</li>
+    <li><strong>We cannot auto-send anything through PropertyFinder itself</strong> — there is no reply/send endpoint anywhere in this API (confirmed across the Leads tab). This lines up with this project's hard rule that the bot never messages a lead directly: the agent still manually opens WhatsApp and sends the first message, using the lead's own <code>message</code> field as the seed for the bot's suggested opener.</li>
+    <li><strong>Polling fallback exists</strong> if webhook delivery ever proves unreliable: <code>GET /v1/leads?senderWhatsappUsername=...</code> can reconcile or backfill missed events.</li>
+    <li><strong>The public profile's <code>whatsappPhone</code> field</strong> (Users tab) is what a lead actually taps to message the agent from the listing page — keep it pointed at whichever number is wired into our read pipe, or leads will be messaging a number we can't see.</li>
+    <li>Nothing here bypasses WhatsApp's 24-hour session / template rule. A brand-new PropertyFinder lead is not yet an open WhatsApp conversation — the agent still has to be the one who sends the first message to start that window.</li>
+  </ol>
+</section>
+
+<footer>Compiled from the PropertyFinder Enterprise API docs — accurate as of the fetch date, re-check the Changelog tab before relying on any field in production.</footer>
+
+</div>
+</body>
+</html>

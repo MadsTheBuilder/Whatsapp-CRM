@@ -19,11 +19,14 @@ drop table if exists agents cascade;
 -- Registry is the ONLY source of identity — no env fallback; an unregistered
 -- number is dropped. Numbers are E.164 digits, no '+' (matches Meta/360dialog).
 create table agents (
-  agent_id     text primary key,
-  read_number  text not null unique,
-  send_number  text not null,
-  name         text,
-  created_at   timestamptz not null default now()
+  agent_id      text primary key,
+  read_number   text not null unique,
+  send_number   text not null,
+  name          text,
+  -- Goyzer's sender number (bare digits). Only a card FROM this number triggers the
+  -- portal lead-relay; null = this agent runs no relay. See src/portal/goyzer.ts.
+  goyzer_number text,
+  created_at    timestamptz not null default now()
 );
 
 create table leads (

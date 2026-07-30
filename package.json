@@ -11,7 +11,7 @@
     "blast": "tsx scripts/blast.ts",
     "repro": "tsx scripts/repro-november.ts",
     "check": "tsx scripts/simulate.ts --check",
-    "test:logic": "tsx scripts/storelogic.test.ts && tsx scripts/baileyparse.test.ts && tsx scripts/dialog360parse.test.ts && tsx scripts/qalogic.test.ts && tsx scripts/reminderlogic.test.ts && tsx scripts/approvallogic.test.ts && tsx scripts/stagelogic.test.ts && tsx scripts/qualgate.test.ts && tsx scripts/voicecard.test.ts && tsx scripts/distill.test.ts && tsx scripts/blast.test.ts && tsx scripts/voiceinterview.test.ts",
+    "test:logic": "tsx scripts/storelogic.test.ts && tsx scripts/baileyparse.test.ts && tsx scripts/dialog360parse.test.ts && tsx scripts/qalogic.test.ts && tsx scripts/reminderlogic.test.ts && tsx scripts/approvallogic.test.ts && tsx scripts/stagelogic.test.ts && tsx scripts/qualgate.test.ts && tsx scripts/voicecard.test.ts && tsx scripts/distill.test.ts && tsx scripts/blast.test.ts && tsx scripts/voiceinterview.test.ts && tsx scripts/goyzerlogic.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

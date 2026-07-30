@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { handleAgentMessage } from "../brain.js";
+import { maybeRelayPortalLead } from "../portal/goyzer.js";
 import { resolveAgentByReadNumber } from "../store.js";
 import type { AgentMessageEvent } from "./types.js";
 
@@ -129,6 +130,19 @@ async function handleAgentWebhook(value: {
   if (!ev) return;
   ev.agentId = agent.agent_id; // stamp the lane resolved from the receiving number
   ev.sendNumber = agent.send_number;
+
+  // A Goyzer lead-relay card (portal enquiry, not agent/lead chat) is handled
+  // entirely here — three template sends + a force-approved seed row — and must
+  // never reach the brain as an ordinary inbound message. Strict sender-gate: only a
+  // card FROM the agent's goyzer_number relays; ev.leadNumber is the sender on an
+  // inbound message (see toEvent). See src/portal/goyzer.ts.
+  try {
+    if (await maybeRelayPortalLead(agent, ev.text, ev.leadNumber)) return;
+  } catch (e) {
+    console.error("[agent] maybeRelayPortalLead failed:", e);
+    return; // don't let a broken relay attempt fall through into the brain
+  }
+
   console.log(
     `[agent] ${ev.direction} ${ev.leadNumber} (${ev.leadName ?? "?"}) → ${ev.agentId}: "${ev.text}" — handing to brain...`,
   );

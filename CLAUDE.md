@@ -2,6 +2,9 @@
 
 This file tells Claude Code what we are building and the rules of the build. Everything below replaces all earlier plans. Nothing from the old version carries over. If you find old code or old docs in this folder that disagree with this file, this file wins.
 
+your responses should never be too verbose, techinical and complex. always choose a simple response meathod when giving a respose
+
+
 ## What we are building (in plain words)
 
 A helper for real-estate agents who sell property in Dubai.
@@ -35,8 +38,18 @@ The message flows:
 
 ## Hard rules we cannot break
 
-- **The bot never messages a lead.** It only messages the agent. (This also keeps us safe from WhatsApp's 24-hour messaging rule and template requirements — we never message strangers.)
-- **The agent sends all replies to leads by hand** (copy the suggestion, paste, send). Our software is read-only toward the lead conversation: it reads, it never sends to the lead.
+- **The bot never messages a lead, with one narrow exception:** relaying a portal
+  lead-notification message (PropertyFinder today) that a third party already wrote,
+  verbatim, from the listing agent's own number, as the first message on a brand-new
+  lead. See [wa_plan/portal-lead-outreach-PROBLEM.md](wa_plan/portal-lead-outreach-PROBLEM.md)
+  for the full design. No other bot→lead send exists. No AI-generated or edited
+  outreach content, ever. Everything after that first relayed message goes back to the
+  normal rule below.
+- **Outside that one exception, the agent sends all replies to leads by hand** (copy
+  the suggestion, paste, send). Our software is otherwise read-only toward the lead
+  conversation: it reads, it never sends to the lead. (This also keeps us safe from
+  WhatsApp's 24-hour messaging rule and template requirements — we don't message
+  strangers with AI-generated content.)
 - **Our software must be able to read the agent's messages** or the product does not work. This is an assumption, not a feature to build. (The company number is on 360dialog; the agent number is read through a swappable pipe — see below.)
 
 ## The two numbers and the swappable pipe
@@ -83,7 +96,8 @@ We use **360dialog** as the WhatsApp provider for both numbers. We have one 360d
 
 Do not build these yet. If they seem needed, stop and ask first.
 
-- The bot auto-sending anything to a lead.
+- The bot auto-sending anything to a lead — except the one narrow portal-relay
+  exception above.
 - Multi-agent accounts, logins, or per-agent permissions (data is agent-tagged, but there is one agent for now).
 - Any CRM / portal / campaign / voice / content features.
 - Fancy dashboards or web UIs unless we specifically decide we need one.

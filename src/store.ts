@@ -203,6 +203,9 @@ export interface Agent {
   read_number: string;
   send_number: string;
   name: string | null;
+  // Goyzer's sender number (bare digits) — a card is only relayed if it came from
+  // here (strict sender-gate). null = this agent runs no portal relay.
+  goyzer_number: string | null;
 }
 
 /** Digits only — strip a stray '+' / spaces so equality-matching a phone can't
@@ -217,7 +220,7 @@ function digitsOnly(n: string): string {
 export async function resolveAgentByReadNumber(readNumber: string): Promise<Agent | undefined> {
   const { data } = await db
     .from("agents")
-    .select("agent_id, read_number, send_number, name")
+    .select("agent_id, read_number, send_number, name, goyzer_number")
     .eq("read_number", digitsOnly(readNumber))
     .maybeSingle();
   return (data as Agent) ?? undefined;
@@ -228,7 +231,7 @@ export async function resolveAgentByReadNumber(readNumber: string): Promise<Agen
 export async function resolveAgentBySendNumber(sendNumber: string): Promise<Agent | undefined> {
   const { data } = await db
     .from("agents")
-    .select("agent_id, read_number, send_number, name")
+    .select("agent_id, read_number, send_number, name, goyzer_number")
     .eq("send_number", digitsOnly(sendNumber))
     .maybeSingle();
   return (data as Agent) ?? undefined;
@@ -238,7 +241,7 @@ export async function resolveAgentBySendNumber(sendNumber: string): Promise<Agen
 export async function listAllAgents(): Promise<Agent[]> {
   const { data, error } = await db
     .from("agents")
-    .select("agent_id, read_number, send_number, name");
+    .select("agent_id, read_number, send_number, name, goyzer_number");
   if (error) throw error;
   return (data as Agent[]) ?? [];
 }
@@ -251,6 +254,7 @@ export async function registerAgent(a: {
   read_number: string;
   send_number: string;
   name?: string;
+  goyzer_number?: string;
 }): Promise<Agent> {
   const { data, error } = await db
     .from("agents")
@@ -259,8 +263,9 @@ export async function registerAgent(a: {
       read_number: digitsOnly(a.read_number),
       send_number: digitsOnly(a.send_number),
       name: a.name ?? null,
+      goyzer_number: a.goyzer_number ? digitsOnly(a.goyzer_number) : null,
     })
-    .select("agent_id, read_number, send_number, name")
+    .select("agent_id, read_number, send_number, name, goyzer_number")
     .single();
   if (error) throw error;
   return data as Agent;
